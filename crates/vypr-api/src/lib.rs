@@ -91,17 +91,26 @@ pub struct Client {
 impl Client {
     /// `base_url` is [`DEFAULT_BASE_URL`] except in tests.
     pub fn new(base_url: &str) -> Result<Self, Error> {
-        let base_url = Url::parse(base_url).map_err(|source| Error::BaseUrl {
+        let parsed = Url::parse(base_url).map_err(|source| Error::BaseUrl {
             url: base_url.to_owned(),
             source,
         })?;
+        if parsed.cannot_be_a_base() {
+            return Err(Error::BaseUrl {
+                url: base_url.to_owned(),
+                source: url::ParseError::RelativeUrlWithCannotBeABaseBase,
+            });
+        }
 
         let http = reqwest::Client::builder()
             .default_headers(standard_headers()?)
             .timeout(TIMEOUT)
             .build()?;
 
-        Ok(Self { http, base_url })
+        Ok(Self {
+            http,
+            base_url: parsed,
+        })
     }
 
     pub async fn locations(&self) -> Result<Vec<Location>, Error> {
@@ -110,19 +119,19 @@ impl Client {
             locations: Vec<Location>,
         }
 
-        let path = "/vyprvpn/locations-unauthenticated";
-        let request = self.get(path).header("locale", "en_US");
-        let body: Body = decode(path, &send(path, request).await?)?;
+        let url = self.url(&["vyprvpn", "locations-unauthenticated"]);
+        let request = self.get(&url).header("locale", "en_US");
+        let body: Body = decode(&url, &send(&url, request).await?)?;
 
         Ok(body.locations)
     }
 
     /// Doubles as the login check: wrong credentials give [`Error::InvalidCredentials`].
     pub async fn settings(&self, credentials: &Credentials) -> Result<Settings, Error> {
-        let path = "/settings";
-        let request = self.get(path).headers(auth_headers(credentials)?);
+        let url = self.url(&["settings"]);
+        let request = self.get(&url).headers(auth_headers(credentials)?);
 
-        decode(path, &send_authenticated(path, request).await?)
+        decode(&url, &send_authenticated(&url, request).await?)
     }
 
     /// Opens a session on a location. `realm` is the one [`Client::settings`] returns.
@@ -133,15 +142,15 @@ impl Client {
         spoke_id: &str,
         client_key: &PublicKey,
     ) -> Result<ConnectResponse, Error> {
-        let path = connections_path(spoke_id);
+        let url = self.url(&connections_path(spoke_id));
         let body = json!({ "Server": spoke_id, "ClientKey": client_key.to_string() });
         let request = self
-            .request(Method::POST, &path)
+            .request(Method::POST, &url)
             .headers(auth_headers(credentials)?)
             .header("x-gf-realm", HeaderValue::try_from(realm)?)
             .body(body.to_string());
 
-        decode(&path, &send_authenticated(&path, request).await?)
+        decode(&url, &send_authenticated(&url, request).await?)
     }
 
     /// Closes a session. The preshared key authorizes this in place of the login.
@@ -151,47 +160,55 @@ impl Client {
         connection_id: &ConnectionId,
         preshared_key: &PresharedKey,
     ) -> Result<(), Error> {
-        let path = format!("{}/{}", connections_path(spoke_id), connection_id.0);
+        let mut segments = connections_path(spoke_id).to_vec();
+        segments.push(&connection_id.0);
+        let url = self.url(&segments);
         let mut psk = HeaderValue::try_from(preshared_key.to_base64().as_str())?;
         psk.set_sensitive(true);
         let request = self
-            .request(Method::DELETE, &path)
+            .request(Method::DELETE, &url)
             .header("wireguard-psk", psk);
 
-        send(&path, request).await?;
+        send(&url, request).await?;
 
         Ok(())
     }
 
     /// The 64-pixel PNG flag for a location's three-letter `country_code`.
     pub async fn flag(&self, country_code: &str) -> Result<Vec<u8>, Error> {
-        let path = format!(
-            "/images/vpn_flags/64/{}.png",
-            country_code.to_ascii_lowercase()
-        );
+        let file = format!("{}.png", country_code.to_ascii_lowercase());
+        let url = self.url(&["images", "vpn_flags", "64", &file]);
 
-        send(&path, self.get(&path)).await
+        send(&url, self.get(&url)).await
     }
 
-    fn get(&self, path: &str) -> RequestBuilder {
-        self.request(Method::GET, path)
-    }
-
-    fn request(&self, method: Method, path: &str) -> RequestBuilder {
+    /// Each segment is percent-encoded, so a `/` or `..` in an id cannot leave its segment.
+    fn url(&self, segments: &[&str]) -> Url {
         let mut url = self.base_url.clone();
-        url.set_path(path);
+        url.path_segments_mut()
+            .expect("Client::new rejects cannot-be-a-base URLs")
+            .clear()
+            .extend(segments);
 
-        self.http.request(method, url)
+        url
+    }
+
+    fn get(&self, url: &Url) -> RequestBuilder {
+        self.request(Method::GET, url)
+    }
+
+    fn request(&self, method: Method, url: &Url) -> RequestBuilder {
+        self.http.request(method, url.clone())
     }
 }
 
-fn connections_path(spoke_id: &str) -> String {
-    format!("/vyprvpn/spokes/{spoke_id}/wg/connections")
+fn connections_path(spoke_id: &str) -> [&str; 5] {
+    ["vyprvpn", "spokes", spoke_id, "wg", "connections"]
 }
 
 /// VyprVPN refuses wrong credentials with 401 or 403.
-async fn send_authenticated(path: &str, request: RequestBuilder) -> Result<Vec<u8>, Error> {
-    send(path, request).await.map_err(|error| match error {
+async fn send_authenticated(url: &Url, request: RequestBuilder) -> Result<Vec<u8>, Error> {
+    send(url, request).await.map_err(|error| match error {
         Error::Http {
             status: StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN,
             ..
@@ -200,14 +217,14 @@ async fn send_authenticated(path: &str, request: RequestBuilder) -> Result<Vec<u
     })
 }
 
-async fn send(path: &str, request: RequestBuilder) -> Result<Vec<u8>, Error> {
+async fn send(url: &Url, request: RequestBuilder) -> Result<Vec<u8>, Error> {
     let response = request.send().await?;
     let status = response.status();
     let body = response.bytes().await?;
 
     if !status.is_success() {
         return Err(Error::Http {
-            path: path.to_owned(),
+            path: url.path().to_owned(),
             status,
             body: String::from_utf8_lossy(&body).trim().to_owned(),
         });
@@ -216,9 +233,9 @@ async fn send(path: &str, request: RequestBuilder) -> Result<Vec<u8>, Error> {
     Ok(body.to_vec())
 }
 
-fn decode<T: DeserializeOwned>(path: &str, body: &[u8]) -> Result<T, Error> {
+fn decode<T: DeserializeOwned>(url: &Url, body: &[u8]) -> Result<T, Error> {
     serde_json::from_slice(body).map_err(|source| Error::Decode {
-        path: path.to_owned(),
+        path: url.path().to_owned(),
         source,
     })
 }
@@ -381,16 +398,14 @@ mod tests {
     #[tokio::test]
     async fn fetches_locations_with_the_standard_headers() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/vyprvpn/locations-unauthenticated"))
-            .and(header("locale", "en_US"))
-            .and(header("x-gf-platform", PLATFORM))
-            .and(header("x-gf-product", "VyprVPN"))
-            .and(header("x-gf-product-version", "6.0.4"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(LOCATIONS))
-            .expect(1)
-            .mount(&server)
-            .await;
+        with_standard_headers(
+            Mock::given(method("GET")).and(path("/vyprvpn/locations-unauthenticated")),
+        )
+        .and(header("locale", "en_US"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(LOCATIONS))
+        .expect(1)
+        .mount(&server)
+        .await;
 
         let locations = client_for(&server).locations().await.unwrap();
 
@@ -411,8 +426,7 @@ mod tests {
     #[tokio::test]
     async fn sends_credentials_and_agent_to_settings() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/settings"))
+        with_standard_headers(Mock::given(method("GET")).and(path("/settings")))
             .and(header("username", "alice"))
             .and(header("password", "correct horse"))
             .and(header("x-gf-agent", alice_agent()))
@@ -590,24 +604,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disconnect_reports_server_errors() {
+    async fn keeps_a_spoke_id_in_one_path_segment() {
         let server = MockServer::start().await;
-        Mock::given(path(format!("{CONNECTIONS}/48213977")))
-            .respond_with(ResponseTemplate::new(503))
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(CONNECT))
+            .expect(1)
             .mount(&server)
             .await;
 
-        let error = disconnect_from_uk1(&client_for(&server)).await.unwrap_err();
+        client_for(&server)
+            .connect(&alice(), "vyprvpn", "a/../b", &CLIENT_KEY.parse().unwrap())
+            .await
+            .unwrap();
 
-        assert!(
-            matches!(
-                error,
-                Error::Http {
-                    status: StatusCode::SERVICE_UNAVAILABLE,
-                    ..
-                }
-            ),
-            "{error}"
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(
+            requests[0].url.path(),
+            "/vyprvpn/spokes/a%2F..%2Fb/wg/connections"
         );
     }
 
