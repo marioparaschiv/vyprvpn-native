@@ -126,7 +126,8 @@ fn bar_edge(icon: PhysicalRect, monitor: PhysicalRect, work_area: PhysicalRect) 
     distances
         .into_iter()
         .min_by_key(|(_, distance)| *distance)
-        .map_or(Edge::Bottom, |(edge, _)| edge)
+        .expect("four edges")
+        .0
 }
 
 #[cfg(test)]
