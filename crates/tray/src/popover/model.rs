@@ -141,7 +141,7 @@ pub fn headline(state: &LinkState) -> Headline {
             connected_at,
         } => Headline {
             tone: Tone::Protected,
-            title: "Connected".to_owned(),
+            title: "Secured".to_owned(),
             detail: Detail::Connected {
                 spoke_id: spoke_id.clone(),
                 tunnel_ip: *tunnel_ip,
@@ -401,7 +401,7 @@ pub(super) mod tests {
             headline(&state(connected("de1"), None)),
             Headline {
                 tone: Tone::Protected,
-                title: "Connected".into(),
+                title: "Secured".into(),
                 detail: Detail::Connected {
                     spoke_id: "de1".into(),
                     tunnel_ip: [10, 1, 2, 3].into(),

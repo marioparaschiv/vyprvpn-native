@@ -44,8 +44,9 @@ use smooth_scroll::SmoothScroll;
 
 const CONTEXT: &str = "LocationPopover";
 
-/// The card's size, which is the window's: the OS draws its shadow.
-const CARD: Size<Pixels> = size(px(340.), px(420.));
+/// The card's size, which is the window's: the OS draws its shadow. The height fits the globe and
+/// the buttons below it with even padding: 310 + 1 border + 2 * 12 padding + 2 * 32 + 8 gap.
+const CARD: Size<Pixels> = size(px(340.), px(407.));
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Cancel, Some(CONTEXT))]);
@@ -315,24 +316,48 @@ impl Popover {
     fn render_main(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let button = model::connect_button(&self.state);
         let primary = matches!(button.action, Some(ConnectAction::Connect(_)));
+        let headline = model::headline(&self.state);
+        let connection = match &headline.detail {
+            Detail::Text(_) => None,
+            Detail::Connected {
+                spoke_id,
+                tunnel_ip,
+                connected_at,
+            } => Some(self.render_connection(spoke_id, *tunnel_ip, *connected_at, cx)),
+        };
 
         v_flex()
             .size_full()
-            .p_4()
-            .gap_4()
-            .child(self.render_status(&model::headline(&self.state), cx))
             .child(
-                v_flex().gap_2().child(self.render_location_row(cx)).child(
-                    Button::new("connect")
-                        .large()
-                        .w_full()
-                        .when(primary, ButtonVariants::primary)
-                        .label(button.label)
-                        .when(button.busy, |this| this.icon(IconName::LoaderCircle))
-                        .loading(button.busy)
-                        .disabled(button.action.is_none())
-                        .on_click(cx.listener(|this, _, _, cx| this.press_connect(cx))),
-                ),
+                // Spans the globe, so the facts sit just above its bottom edge, inset by as much
+                // as their sides.
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .p_4()
+                    .pb_2()
+                    .gap_4()
+                    .child(self.render_status(&headline, cx))
+                    .children(connection),
+            )
+            .child(
+                v_flex()
+                    .p_3()
+                    .gap_2()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .child(self.render_location_row(cx))
+                    .child(
+                        Button::new("connect")
+                            .large()
+                            .w_full()
+                            .when(primary, ButtonVariants::primary)
+                            .label(button.label)
+                            .when(button.busy, |this| this.icon(IconName::LoaderCircle))
+                            .loading(button.busy)
+                            .disabled(button.action.is_none())
+                            .on_click(cx.listener(|this, _, _, cx| this.press_connect(cx))),
+                    ),
             )
     }
 
@@ -347,7 +372,10 @@ impl Popover {
         let symbol = match headline.tone {
             Tone::Idle => Icon::new(IconName::Globe).size_8().into_any_element(),
             Tone::Busy => Spinner::new().large().color(color).into_any_element(),
-            Tone::Protected => Icon::new(IconName::CircleCheck).size_8().into_any_element(),
+            Tone::Protected => Icon::default()
+                .data(LOCK_FILLED)
+                .size_8()
+                .into_any_element(),
             Tone::Failed => Icon::new(IconName::CircleAlert).size_8().into_any_element(),
         };
 
@@ -372,21 +400,16 @@ impl Popover {
                     .font_semibold()
                     .child(headline.title.clone()),
             )
-            .child(match &headline.detail {
-                Detail::Text(text) => div()
-                    .max_w_full()
-                    .text_sm()
-                    .text_center()
-                    .text_color(theme.muted_foreground)
-                    .child(text.clone())
-                    .into_any_element(),
-                Detail::Connected {
-                    spoke_id,
-                    tunnel_ip,
-                    connected_at,
-                } => self
-                    .render_connection(spoke_id, *tunnel_ip, *connected_at, cx)
-                    .into_any_element(),
+            .children(match &headline.detail {
+                Detail::Text(text) => Some(
+                    div()
+                        .max_w_full()
+                        .text_sm()
+                        .text_center()
+                        .text_color(theme.muted_foreground)
+                        .child(text.clone()),
+                ),
+                Detail::Connected { .. } => None,
             })
     }
 
@@ -505,7 +528,7 @@ impl Popover {
                                 cx.listener(|this, _, window, cx| this.show_main(window, cx)),
                             ),
                     )
-                    .child(div().font_semibold().child("Locations")),
+                    .child(h_flex().h_full().pl_1().font_semibold().child("Locations")),
             )
             .child(SmoothScroll::new(
                 "locations-scroll",
@@ -603,6 +626,9 @@ fn recorded_locations() -> std::result::Result<Vec<ipc::Location>, ipc::CodecErr
     Ok(response.locations)
 }
 
+/// Lucide's `lock` with its body filled, which Lucide only draws outlined.
+const LOCK_FILLED: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" fill="currentColor"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>"#;
+
 /// The country's cached flag, or a neutral placeholder of the same size while it is missing.
 fn flag(flag_dir: Option<&Path>, country_code: &str, cx: &App) -> AnyElement {
     let muted = cx.theme().muted;
@@ -620,9 +646,13 @@ fn flag(flag_dir: Option<&Path>, country_code: &str, cx: &App) -> AnyElement {
         .and_then(|dir| Some(dir.join(flags::file_name(country_code).ok()?)))
         .filter(|path| path.is_file());
 
+    // Text sits below the middle of its line box by the font's descent, so the flag drops a pixel
+    // to line up with the name beside it.
     h_flex()
         .size_5()
         .flex_none()
+        .relative()
+        .top(px(1.))
         .justify_center()
         .child(match path {
             Some(path) => img(path)

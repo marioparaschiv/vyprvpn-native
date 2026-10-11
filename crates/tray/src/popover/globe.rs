@@ -22,7 +22,7 @@ use crate::icons;
 /// centred horizontally, cropped by the card's top and sides, and stops above the Connect button.
 const CENTRE_Y: f32 = 125.;
 const RADIUS: f32 = 185.;
-const HEIGHT: f32 = 310.;
+pub const HEIGHT: f32 = 310.;
 /// Where the facing point sits once fully zoomed in: up and right of the status icon, so the
 /// marker stays clear of it and of the headline.
 const ZOOMED_CENTRE: (f32, f32) = (250., 70.);
