@@ -29,11 +29,15 @@ Both use a pipe only the current user can reach, so they never touch an installe
 
 ## Install
 
-From an elevated prompt, as the user who will use VyprLite, in the folder `cargo xtask dist` wrote:
+From an elevated prompt, as the user who will use VyprLite, copy the folder `cargo xtask dist` wrote to `C:\Program Files\VyprLite` and install from there:
 
 ```bat
+xcopy /e /i dist "C:\Program Files\VyprLite"
+cd /d "C:\Program Files\VyprLite"
 vyprlite-helper.exe install
 ```
+
+The service runs `vyprlite-helper.exe` and loads `wireguard.dll` as SYSTEM, so install refuses a folder that anyone but SYSTEM, Administrators and TrustedInstaller can change, including `dist\` itself. It also refuses when anyone else could rename a folder above it.
 
 This registers the `VyprLiteHelper` service (manual start, LocalSystem), lets you start it and query it without elevation, and starts `VyprLite.exe` unelevated at your next login. The tray app starts the service itself, and the service stops 5 s after the tray app exits unless a tunnel is up. Run it again after moving the folder. The service logs to `helper.log`, records panics in `crash.log` and keeps the encrypted login in `credentials.bin` under `%SystemRoot%\System32\config\systemprofile\AppData\Local\VyprLite`.
 

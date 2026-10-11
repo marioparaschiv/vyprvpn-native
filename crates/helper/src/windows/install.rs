@@ -18,10 +18,14 @@ use windows_sys::Win32::Foundation::{
 use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE};
 
+use super::install_dir::{self, InstallDirError};
 use super::security::{CurrentSidError, Sid};
 use crate::disconnect::{DisconnectError, disconnect_blocking};
 
 const SERVICE_DISPLAY_NAME: &str = "VyprLite Helper";
+const HELPER_EXE: &str = "vyprlite-helper.exe";
+/// The tunnel loads it from the helper's folder.
+const WIREGUARD_DLL: &str = "wireguard.dll";
 const TRAY_EXE: &str = "VyprLite.exe";
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const AUTOSTART_VALUE: &str = "VyprLite";
@@ -38,6 +42,8 @@ pub enum InstallError {
     CurrentUser(#[from] CurrentSidError),
     #[error("finding the helper's own directory failed: {0}")]
     ExeDir(io::Error),
+    #[error(transparent)]
+    InstallDir(#[from] InstallDirError),
     #[error("environment variable SystemRoot is not set")]
     MissingSystemRoot,
     #[error("{action} failed: {}", ipc::service_error_cause(.source))]
@@ -123,7 +129,7 @@ struct Found {
 
 fn install_plan(exe_dir: &Path, owner: &Sid, service: HelperService) -> Vec<Step> {
     let config = ServiceConfig {
-        executable: exe_dir.join("vyprlite-helper.exe"),
+        executable: exe_dir.join(HELPER_EXE),
         arguments: ["--service", "--owner-sid", &owner.to_string()]
             .map(OsString::from)
             .into(),
@@ -186,6 +192,8 @@ pub fn install() -> Result<(), InstallError> {
     let manager = elevated_service_manager()?;
     let owner = Sid::current()?;
     let exe_dir = crate::exe_dir().map_err(InstallError::ExeDir)?;
+    // The service runs the helper, and it loads the DLL, as SYSTEM.
+    install_dir::check(&system_root()?, &exe_dir, &[HELPER_EXE, WIREGUARD_DLL])?;
 
     let plan = install_plan(&exe_dir, &owner, find_service(&manager)?);
     execute(&manager, &plan)?;

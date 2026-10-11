@@ -1,5 +1,6 @@
 mod credential_store;
 mod install;
+mod install_dir;
 mod security;
 mod service;
 mod wireguard;
