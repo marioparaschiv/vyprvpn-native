@@ -11,6 +11,7 @@ mod windows;
 use std::fmt;
 use std::time::Duration;
 
+pub use locations::Location;
 use md5::{Digest, Md5};
 pub use reqwest::StatusCode;
 use reqwest::header::{
@@ -57,17 +58,6 @@ pub enum Error {
     HeaderValue(#[from] InvalidHeaderValue),
     #[error("could not read the OS version: {0}")]
     OsVersion(#[from] OsVersionError),
-}
-
-/// One entry of the locations endpoint; the API sends more fields than these.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Location {
-    pub name: String,
-    pub country: String,
-    pub country_code: String,
-    pub region: String,
-    pub spoke_id: String,
-    pub hostname: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

@@ -4801,7 +4801,6 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
- "vypr-api",
 ]
 
 [[package]]
@@ -8923,6 +8922,7 @@ dependencies = [
 name = "vypr-api"
 version = "0.1.0"
 dependencies = [
+ "locations",
  "md-5 0.11.0",
  "reqwest",
  "serde",

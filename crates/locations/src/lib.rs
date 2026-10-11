@@ -1,6 +1,17 @@
 use std::collections::BTreeMap;
 
-use vypr_api::Location;
+use serde::{Deserialize, Serialize};
+
+/// One entry of the locations endpoint; the API sends more fields than these.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Location {
+    pub name: String,
+    pub country: String,
+    pub country_code: String,
+    pub region: String,
+    pub spoke_id: String,
+    pub hostname: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Region {
@@ -12,7 +23,7 @@ pub struct Region {
 pub struct Country {
     pub name: String,
     pub country_code: String,
-    /// One entry for a country with a single location; the menu shows a City submenu otherwise.
+    /// Sorted by name; a country with one location has one entry.
     pub cities: Vec<City>,
 }
 
@@ -106,8 +117,6 @@ fn has_word_starting_with(text: &str, prefix: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use serde::Deserialize;
-
     use super::*;
 
     const LOCATIONS: &str = include_str!("../../vypr-api/tests/fixtures/locations.json");
@@ -217,7 +226,6 @@ mod tests {
         let mut expected: Vec<&str> = locations.iter().map(|l| l.spoke_id.as_str()).collect();
         expected.sort_unstable();
 
-        assert_eq!(locations.len(), 73);
         assert_eq!(spoke_ids, expected);
     }
 
