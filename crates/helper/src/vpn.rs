@@ -14,15 +14,27 @@ use tunnel::{
     TunnelConfig,
 };
 
+use vypr_api::StatusCode;
+
 use crate::session_store::{Saved, Session, SessionStore, SessionStoreError};
 
 mod recovery;
 
+/// The realm VyprVPN puts the current login in, fetched at most once per login and shared by every
+/// connect until the next login or logout.
+pub type Realm = Arc<OnceCell<String>>;
+
 /// The VyprVPN calls that open and close a session.
 pub trait SessionApi: Send + Sync + 'static {
+    fn realm(
+        &self,
+        credentials: &Credentials,
+    ) -> impl Future<Output = Result<String, vypr_api::Error>> + Send;
+
     fn open(
         &self,
         credentials: &Credentials,
+        realm: &str,
         spoke_id: &str,
         client_key: &PublicKey,
     ) -> impl Future<Output = Result<ConnectResponse, vypr_api::Error>> + Send;
@@ -31,16 +43,18 @@ pub trait SessionApi: Send + Sync + 'static {
 }
 
 impl SessionApi for vypr_api::Client {
+    async fn realm(&self, credentials: &Credentials) -> Result<String, vypr_api::Error> {
+        Ok(self.settings(credentials).await?.realm)
+    }
+
     async fn open(
         &self,
         credentials: &Credentials,
+        realm: &str,
         spoke_id: &str,
         client_key: &PublicKey,
     ) -> Result<ConnectResponse, vypr_api::Error> {
-        let realm = self.settings(credentials).await?.realm;
-
-        self.connect(credentials, &realm, spoke_id, client_key)
-            .await
+        self.connect(credentials, realm, spoke_id, client_key).await
     }
 
     async fn close(&self, session: &Session) -> Result<(), vypr_api::Error> {
@@ -86,6 +100,8 @@ enum StepError<E: Error + 'static> {
     Store(#[from] SessionStoreError),
     #[error("the tunnel task failed")]
     Blocking(#[from] JoinError),
+    #[error("{0}")]
+    TunnelRecovery(String),
 }
 
 /// The error and its causes on one line, for the tray app's notification.
@@ -109,6 +125,7 @@ fn describe(error: &dyn Error) -> String {
 struct Target {
     spoke_id: String,
     credentials: Credentials,
+    realm: Realm,
 }
 
 struct Up<A> {
@@ -145,7 +162,8 @@ pub struct Vpn<A, T: Tunnel> {
     target: Mutex<Option<Target>>,
     status: watch::Sender<Status>,
     current: tokio::sync::Mutex<Current<T::Active>>,
-    tunnel_recovered: OnceCell<()>,
+    /// The described error when what the previous helper's tunnel left could not be undone.
+    tunnel_recovered: OnceCell<Result<(), String>>,
     /// Notified when a session joins the pending deletions.
     deletions_owed: Notify,
 }
@@ -183,7 +201,12 @@ impl<A: SessionApi, T: Tunnel> Vpn<A, T> {
     }
 
     /// Switches when already connected elsewhere.
-    pub fn connect(self: &Arc<Self>, spoke_id: String, credentials: Credentials) -> Status {
+    pub fn connect(
+        self: &Arc<Self>,
+        spoke_id: String,
+        credentials: Credentials,
+        realm: Realm,
+    ) -> Status {
         let status = Status::Connecting {
             spoke_id: spoke_id.clone(),
         };
@@ -192,6 +215,7 @@ impl<A: SessionApi, T: Tunnel> Vpn<A, T> {
             *target = Some(Target {
                 spoke_id,
                 credentials,
+                realm,
             });
             self.status.send_replace(status.clone());
         }
@@ -277,15 +301,22 @@ impl<A: SessionApi, T: Tunnel> Vpn<A, T> {
         current: &mut Current<T::Active>,
         target: &Target,
     ) -> Result<(), StepError<T::Error>> {
-        self.recover_tunnel().await;
+        self.recover_tunnel()
+            .await
+            .map_err(StepError::TunnelRecovery)?;
         current.saved.last_spoke_id = Some(target.spoke_id.clone());
         self.store.save(&current.saved)?;
 
+        let realm = target
+            .realm
+            .get_or_try_init(|| self.api.realm(&target.credentials))
+            .await?;
         let private_key = PrivateKey::generate()?;
         let response = self
             .api
             .open(
                 &target.credentials,
+                realm,
                 &target.spoke_id,
                 &private_key.public_key(),
             )
@@ -346,7 +377,7 @@ impl<A: SessionApi, T: Tunnel> Vpn<A, T> {
         let Some(session) = current.saved.session.take() else {
             return down;
         };
-        let closed = self.api.close(&session).await;
+        let closed = self.close_session(&session).await;
         if closed.is_err() {
             current.saved.pending_deletions.push(session);
             self.deletions_owed.notify_one();
@@ -357,6 +388,24 @@ impl<A: SessionApi, T: Tunnel> Vpn<A, T> {
         closed?;
         saved?;
         Ok(())
+    }
+
+    /// VyprVPN answers 404 for a session it no longer has, which is as good as deleted.
+    async fn close_session(&self, session: &Session) -> Result<(), vypr_api::Error> {
+        match self.api.close(session).await {
+            Err(vypr_api::Error::Http {
+                status: StatusCode::NOT_FOUND,
+                ..
+            }) => {
+                log::info!(
+                    "session {} on {} was already gone",
+                    session.connection_id.0,
+                    session.spoke_id
+                );
+                Ok(())
+            }
+            closed => closed,
+        }
     }
 
     fn publish_for(&self, spoke_id: &str, status: Status) {
@@ -417,10 +466,28 @@ pub mod fakes {
 
     use serde_json::json;
     use tokio::sync::Semaphore;
+    use tunnel::ConnectionId;
 
     use super::*;
 
     pub const TUNNEL_IP: Ipv4Addr = Ipv4Addr::new(10, 21, 0, 7);
+    pub const PRESHARED: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+    const REALM: &str = "vyprvpn";
+
+    pub fn alice() -> Credentials {
+        Credentials {
+            username: "alice".into(),
+            password: "correct horse".into(),
+        }
+    }
+
+    pub fn session(connection_id: &str) -> Session {
+        Session {
+            spoke_id: "de1".into(),
+            connection_id: ConnectionId(connection_id.into()),
+            preshared_key: PRESHARED.parse().unwrap(),
+        }
+    }
 
     /// A VyprVPN that hands out numbered sessions.
     pub struct FakeApi {
@@ -433,6 +500,7 @@ pub mod fakes {
         pub refused_closes: Mutex<usize>,
         /// Answers every `close` with 404, like VyprVPN for a session it no longer has.
         pub unknown_sessions: bool,
+        pub realm_fetches: Mutex<usize>,
         pub opened: Mutex<Vec<String>>,
         pub closed: Mutex<Vec<String>>,
     }
@@ -445,6 +513,7 @@ pub mod fakes {
                 refuse: false,
                 refused_closes: Mutex::new(0),
                 unknown_sessions: false,
+                realm_fetches: Mutex::new(0),
                 opened: Mutex::default(),
                 closed: Mutex::default(),
             }
@@ -452,12 +521,20 @@ pub mod fakes {
     }
 
     impl SessionApi for Arc<FakeApi> {
+        async fn realm(&self, _credentials: &Credentials) -> Result<String, vypr_api::Error> {
+            *self.realm_fetches.lock().unwrap() += 1;
+
+            Ok(REALM.to_owned())
+        }
+
         async fn open(
             &self,
             _credentials: &Credentials,
+            realm: &str,
             spoke_id: &str,
             _client_key: &PublicKey,
         ) -> Result<ConnectResponse, vypr_api::Error> {
+            assert_eq!(realm, REALM);
             self.opening.notify_one();
             self.permits.acquire().await.unwrap().forget();
             if self.refuse {
@@ -471,7 +548,7 @@ pub mod fakes {
                 "Interface": {"Address": format!("{TUNNEL_IP}/32"), "DNS": ["10.21.0.1"]},
                 "Peer": {
                     "PublicKey": "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=",
-                    "PresharedKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                    "PresharedKey": PRESHARED,
                     "Endpoint": "203.0.113.10:51820",
                 },
             });
@@ -511,6 +588,7 @@ pub mod fakes {
     #[derive(Default)]
     pub struct FakeTunnel {
         pub refuse: bool,
+        pub refuse_recovery: bool,
         pub recoveries: Mutex<usize>,
         pub recovered: Notify,
         pub ups: Mutex<usize>,
@@ -524,6 +602,9 @@ pub mod fakes {
         fn recover(&self) -> Result<(), FakeTunnelError> {
             *self.recoveries.lock().unwrap() += 1;
             self.recovered.notify_one();
+            if self.refuse_recovery {
+                return Err(FakeTunnelError);
+            }
 
             Ok(())
         }
@@ -555,6 +636,7 @@ pub mod fakes {
         pub data_dir: tempfile::TempDir,
         pub vpn: Arc<Vpn<Arc<FakeApi>, Arc<FakeTunnel>>>,
         pub status: watch::Receiver<Status>,
+        realm: Realm,
     }
 
     impl Harness {
@@ -575,17 +657,13 @@ pub mod fakes {
                 data_dir,
                 vpn,
                 status,
+                realm: Realm::default(),
             }
         }
 
         pub fn connect(&self, spoke_id: &str) -> Status {
-            self.vpn.connect(
-                spoke_id.to_owned(),
-                Credentials {
-                    username: "alice".into(),
-                    password: "correct horse".into(),
-                },
-            )
+            self.vpn
+                .connect(spoke_id.to_owned(), alice(), self.realm.clone())
         }
 
         pub async fn settled(&mut self) -> Status {
@@ -793,6 +871,37 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["de1-1"]
         );
+    }
+
+    #[tokio::test]
+    async fn forgets_a_session_vyprvpn_no_longer_has_on_disconnect() {
+        let mut vpn = Harness::new(
+            FakeApi {
+                unknown_sessions: true,
+                ..FakeApi::default()
+            },
+            FakeTunnel::default(),
+        );
+        vpn.connect("de1");
+        vpn.settled().await;
+
+        vpn.vpn.disconnect();
+
+        assert_eq!(vpn.settled().await, disconnected("de1", None));
+        assert_eq!(vpn.saved().pending_deletions, []);
+    }
+
+    #[tokio::test]
+    async fn fetches_the_realm_once_per_login() {
+        let mut vpn = Harness::new(FakeApi::default(), FakeTunnel::default());
+        vpn.connect("de1");
+        vpn.settled().await;
+
+        vpn.connect("uk1");
+        vpn.settled().await;
+
+        assert_eq!(vpn.opened(), ["de1", "uk1"]);
+        assert_eq!(*vpn.api.realm_fetches.lock().unwrap(), 1);
     }
 
     #[tokio::test]

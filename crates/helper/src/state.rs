@@ -1,11 +1,11 @@
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use ipc::{Account, Credentials, Location, Status};
 use tokio::sync::{OnceCell, watch};
 
-use crate::platform::{CredentialStore, CredentialStoreError};
-use crate::vpn::{Tunnel, Vpn};
+use crate::credential_store::{CredentialStore, CredentialStoreError};
+use crate::vpn::{Realm, Tunnel, Vpn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoginError {
@@ -45,6 +45,8 @@ pub struct State<T: Tunnel> {
     vpn: Arc<Vpn<vypr_api::Client, T>>,
     locations: OnceCell<Vec<Location>>,
     credentials: CredentialStore,
+    /// Known from the login; after a restart the first connect fetches it.
+    realm: Mutex<Realm>,
     account: OnceLock<watch::Sender<Account>>,
 }
 
@@ -57,6 +59,7 @@ impl<T: Tunnel> State<T> {
             api,
             locations: OnceCell::new(),
             credentials: CredentialStore::new(data_dir),
+            realm: Mutex::default(),
             account: OnceLock::new(),
         })
     }
@@ -94,8 +97,9 @@ impl<T: Tunnel> State<T> {
     }
 
     pub async fn login(&self, credentials: Credentials) -> Result<Account, LoginError> {
-        self.api.settings(&credentials).await?;
+        let realm = self.api.settings(&credentials).await?.realm;
         self.credentials.save(&credentials)?;
+        *self.realm() = Arc::new(OnceCell::from(realm));
 
         log::info!("logged in as {}", credentials.username);
         Ok(self.publish(Account::LoggedIn {
@@ -107,7 +111,9 @@ impl<T: Tunnel> State<T> {
     pub fn connect(&self, spoke_id: String) -> Result<Status, ConnectError> {
         let credentials = self.credentials.load()?.ok_or(ConnectError::LoggedOut)?;
 
-        Ok(self.vpn.connect(spoke_id, credentials))
+        Ok(self
+            .vpn
+            .connect(spoke_id, credentials, self.realm().clone()))
     }
 
     pub fn disconnect(&self) -> Status {
@@ -117,9 +123,14 @@ impl<T: Tunnel> State<T> {
     pub fn logout(&self) -> Result<Account, CredentialStoreError> {
         self.vpn.disconnect();
         self.credentials.delete()?;
+        *self.realm() = Realm::default();
 
         log::info!("logged out");
         Ok(self.publish(Account::LoggedOut))
+    }
+
+    fn realm(&self) -> MutexGuard<'_, Realm> {
+        self.realm.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn publish(&self, account: Account) -> Account {

@@ -1,20 +1,27 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use vypr_api::StatusCode;
+use ipc::Status;
 
 use super::{SessionApi, Tunnel, Vpn, describe};
-use crate::session_store::{Saved, Session, SessionStore};
+use crate::session_store::{Saved, Session, SessionStore, SessionStoreError};
 
 const FIRST_RETRY: Duration = Duration::from_secs(2);
 const MAX_RETRY: Duration = Duration::from_secs(5 * 60);
 
 /// Reads what the previous helper left, before any request is served. Its tunnel died with it,
 /// so a recorded session moves to the pending deletions before a connect can overwrite it. A
-/// corrupt record is reset, and the error is returned for the status.
+/// corrupt record is reset, while one that cannot be read is left alone, since it may still hold
+/// sessions to delete; either way the error is returned for the status.
 pub(super) fn restore(store: &SessionStore) -> (Saved, Option<String>) {
     let mut saved = match store.load() {
         Ok(saved) => saved,
+        Err(error @ SessionStoreError::Io { .. }) => {
+            let message = format!("reading the saved connection failed: {error}");
+            log::error!("{message}");
+
+            return (Saved::default(), Some(message));
+        }
         Err(error) => {
             let message =
                 format!("the saved connection was unreadable and has been reset: {error}");
@@ -44,22 +51,41 @@ pub(super) fn restore(store: &SessionStore) -> (Saved, Option<String>) {
 
 impl<A: SessionApi, T: Tunnel> Vpn<A, T> {
     pub(super) async fn recover(self: Arc<Self>) {
-        self.recover_tunnel().await;
+        if let Err(error) = self.recover_tunnel().await {
+            self.report_while_disconnected(error);
+        }
         self.delete_pending_sessions().await;
     }
 
-    /// Runs the platform's recovery once; a connect waits for it before bringing a tunnel up.
-    pub(super) async fn recover_tunnel(&self) {
+    /// Runs the platform's recovery once; a connect waits for it before bringing a tunnel up, and
+    /// fails if what the previous helper's tunnel left could not be undone.
+    pub(super) async fn recover_tunnel(&self) -> Result<(), String> {
         self.tunnel_recovered
             .get_or_init(|| async {
                 let tunnel = self.tunnel.clone();
-                match tokio::task::spawn_blocking(move || tunnel.recover()).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) => log::error!("{error}"),
-                    Err(error) => log::error!("undoing a leftover tunnel panicked: {error}"),
-                }
+                let error = match tokio::task::spawn_blocking(move || tunnel.recover()).await {
+                    Ok(Ok(())) => return Ok(()),
+                    Ok(Err(error)) => describe(&error),
+                    Err(error) => format!("undoing a leftover tunnel panicked: {error}"),
+                };
+                log::error!("{error}");
+
+                Err(error)
             })
-            .await;
+            .await
+            .clone()
+    }
+
+    fn report_while_disconnected(&self, message: String) {
+        let _target = self.target();
+
+        self.status.send_if_modified(|status| match status {
+            Status::Disconnected { error, .. } => {
+                *error = Some(message);
+                true
+            }
+            _ => false,
+        });
     }
 
     /// Deletes the pending sessions, retrying failures with a capped backoff, then waits for the
@@ -78,19 +104,8 @@ impl<A: SessionApi, T: Tunnel> Vpn<A, T> {
 
             let mut deleted = Vec::new();
             for session in &pending {
-                match self.api.close(session).await {
+                match self.close_session(session).await {
                     Ok(()) => deleted.push(session.clone()),
-                    Err(vypr_api::Error::Http {
-                        status: StatusCode::NOT_FOUND,
-                        ..
-                    }) => {
-                        log::info!(
-                            "session {} on {} was already gone",
-                            session.connection_id.0,
-                            session.spoke_id
-                        );
-                        deleted.push(session.clone());
-                    }
                     Err(error) => log::warn!(
                         "deleting session {} on {} failed; retrying in {retry_in:?}: {}",
                         session.connection_id.0,
@@ -132,21 +147,10 @@ mod tests {
     use std::fs;
     use std::sync::Mutex;
 
-    use ipc::Status;
-    use tunnel::ConnectionId;
+    use tokio::time::sleep;
 
     use super::*;
-    use crate::vpn::fakes::{FakeApi, FakeTunnel, Harness};
-
-    const PRESHARED: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
-
-    fn session(connection_id: &str) -> Session {
-        Session {
-            spoke_id: "de1".into(),
-            connection_id: ConnectionId(connection_id.into()),
-            preshared_key: PRESHARED.parse().unwrap(),
-        }
-    }
+    use crate::vpn::fakes::{FakeApi, FakeTunnel, Harness, session};
 
     fn left_behind(saved: &Saved) -> tempfile::TempDir {
         let data_dir = tempfile::tempdir().unwrap();
@@ -162,12 +166,6 @@ mod tests {
         }
     }
 
-    /// Lets the background recovery run until it waits on the clock or for more work; the clock
-    /// is paused, so this does not really sleep.
-    async fn let_recovery_run_for(duration: Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
     #[tokio::test(start_paused = true)]
     async fn no_session_reports_disconnected_from_the_last_location() {
         let saved = Saved {
@@ -180,7 +178,7 @@ mod tests {
             left_behind(&saved),
         );
 
-        let_recovery_run_for(MAX_RETRY).await;
+        sleep(MAX_RETRY).await;
 
         assert_eq!(*vpn.status.borrow(), disconnected_from_de1());
         assert!(vpn.closed().is_empty());
@@ -202,7 +200,7 @@ mod tests {
         assert_eq!(*vpn.status.borrow(), disconnected_from_de1());
         assert_eq!(vpn.saved().session, None);
 
-        let_recovery_run_for(FIRST_RETRY).await;
+        sleep(FIRST_RETRY).await;
 
         assert_eq!(vpn.closed(), ["48213977"]);
         assert_eq!(
@@ -230,11 +228,11 @@ mod tests {
             }),
         );
 
-        let_recovery_run_for(FIRST_RETRY / 2).await;
+        sleep(FIRST_RETRY / 2).await;
         assert!(vpn.closed().is_empty());
         assert_eq!(vpn.saved().pending_deletions.len(), 2);
 
-        let_recovery_run_for(FIRST_RETRY).await;
+        sleep(FIRST_RETRY).await;
         assert_eq!(vpn.closed(), ["48213900", "48213977"]);
         assert_eq!(vpn.saved().pending_deletions, []);
     }
@@ -254,7 +252,7 @@ mod tests {
             }),
         );
 
-        let_recovery_run_for(FIRST_RETRY / 2).await;
+        sleep(FIRST_RETRY / 2).await;
 
         assert_eq!(vpn.saved().pending_deletions, []);
     }
@@ -273,7 +271,7 @@ mod tests {
         vpn.vpn.disconnect();
         vpn.settled().await;
 
-        let_recovery_run_for(FIRST_RETRY).await;
+        sleep(FIRST_RETRY).await;
 
         assert_eq!(vpn.closed(), ["de1-1"]);
         assert_eq!(vpn.saved().pending_deletions, []);
@@ -298,6 +296,29 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn unreadable_record_is_reported_and_kept() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let record = data_dir.path().join("connection.json");
+        fs::create_dir(&record).unwrap();
+
+        let vpn = Harness::in_dir(FakeApi::default(), FakeTunnel::default(), data_dir);
+
+        let Status::Disconnected {
+            last_spoke_id: None,
+            error: Some(error),
+        } = vpn.status.borrow().clone()
+        else {
+            panic!("{:?}", vpn.status.borrow());
+        };
+        assert!(
+            error.starts_with("reading the saved connection failed"),
+            "{error}"
+        );
+        assert!(record.is_dir());
+        assert_eq!(fs::read_dir(vpn.data_dir.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn recovers_the_tunnel_once_at_startup_before_any_connect() {
         let mut vpn = Harness::new(FakeApi::default(), FakeTunnel::default());
         vpn.tunnel.recovered.notified().await;
@@ -307,5 +328,42 @@ mod tests {
 
         assert_eq!(*vpn.tunnel.recoveries.lock().unwrap(), 1);
         assert_eq!(*vpn.tunnel.ups.lock().unwrap(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failed_tunnel_recovery_is_reported_and_fails_connects() {
+        let mut vpn = Harness::new(
+            FakeApi::default(),
+            FakeTunnel {
+                refuse_recovery: true,
+                ..FakeTunnel::default()
+            },
+        );
+
+        let reported = vpn
+            .status
+            .wait_for(|status| matches!(status, Status::Disconnected { error: Some(_), .. }))
+            .await
+            .unwrap()
+            .clone();
+        assert_eq!(
+            reported,
+            Status::Disconnected {
+                last_spoke_id: None,
+                error: Some("the fake adapter refused".into()),
+            }
+        );
+
+        vpn.connect("de1");
+
+        assert_eq!(
+            vpn.settled().await,
+            Status::Disconnected {
+                last_spoke_id: Some("de1".into()),
+                error: Some("the fake adapter refused".into()),
+            }
+        );
+        assert!(vpn.opened().is_empty());
+        assert_eq!(*vpn.tunnel.recoveries.lock().unwrap(), 1);
     }
 }

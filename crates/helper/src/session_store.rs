@@ -114,10 +114,7 @@ impl SessionStore {
             session: saved.session.as_ref().map(session),
             pending_deletions: saved.pending_deletions.iter().map(session).collect(),
         };
-        let json = serde_json::to_vec(&file).map_err(|source| SessionStoreError::Malformed {
-            path: self.path.clone(),
-            source,
-        })?;
+        let json = serde_json::to_vec(&file).expect("SavedFile serializes");
         let partial = self.path.with_extension("json.partial");
 
         fs::write(&partial, json).map_err(|source| self.io_error(source))?;
@@ -135,16 +132,7 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const PRESHARED: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
-
-    fn session(connection_id: &str) -> Session {
-        Session {
-            spoke_id: "de1".into(),
-            connection_id: ConnectionId(connection_id.into()),
-            preshared_key: PRESHARED.parse().unwrap(),
-        }
-    }
+    use crate::vpn::fakes::{PRESHARED, session};
 
     fn connected_to_de1() -> Saved {
         Saved {
