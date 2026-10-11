@@ -102,12 +102,15 @@ impl Popover {
         let flag_dir = flags::cache_dir()
             .inspect_err(|error| log::warn!("flags are unavailable: {error}"))
             .ok();
-        let opened = gpui_kit::open_window(options, cx, |window, cx| {
+        let (window, popover) = gpui_kit::open_window(options, cx, |window, cx| {
             cx.new(|cx| Self::new(state, flag_dir, window, cx))
         })?;
+        // `cx.activate` does nothing on Windows; the window must take the foreground itself, which
+        // the tray click allows.
         cx.activate(true);
+        window.update(cx, |_, window, _| window.activate_window())?;
 
-        Ok(opened)
+        Ok((window, popover))
     }
 
     fn new(
@@ -124,11 +127,7 @@ impl Popover {
 
         let _subscriptions = vec![
             cx.subscribe_in(&locations, window, Self::on_list_event),
-            cx.observe_window_activation(window, |_, window, _| {
-                if !window.is_window_active() {
-                    window.remove_window();
-                }
-            }),
+            cx.observe_window_activation(window, Self::on_activation_change),
             theme::observe_window(window),
         ];
 
@@ -199,6 +198,24 @@ impl Popover {
         self.page = Page::Main;
         window.focus(&self.focus_handle, cx);
         cx.notify();
+    }
+
+    /// Windows reports each activation change separately and late, so moving the foreground to
+    /// the popover can report it inactive just before reporting it active again. Only an
+    /// inactive state that outlasts the changes already reported closes it.
+    fn on_activation_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if window.is_window_active() {
+            return;
+        }
+
+        cx.spawn_in(window, async |_, cx| {
+            cx.update(|window, _| {
+                if !window.is_window_active() {
+                    window.remove_window();
+                }
+            })
+        })
+        .detach();
     }
 
     fn on_list_event(
@@ -530,7 +547,7 @@ mod tests {
     use std::rc::Rc;
 
     use gpui_kit::component::IndexPath;
-    use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+    use gpui_kit::{AppContext, Empty, Entity, TestAppContext, VisualTestContext};
     use ipc::Status;
 
     use gpui_kit::component::list::ListDelegate;
@@ -673,6 +690,45 @@ mod tests {
         cx.run_until_parked();
 
         assert!(cx.windows().is_empty());
+    }
+
+    #[gpui_kit::test]
+    fn using_the_popover_keeps_it_open(cx: &mut TestAppContext) {
+        let (popover, events, cx) = open(disconnected(), cx);
+        let popover_window = cx.update(|window, _| window.window_handle());
+        let other_window = cx.update(|_, cx| {
+            cx.open_window(Default::default(), |_, cx| cx.new(|_| Empty))
+                .unwrap()
+        });
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+
+        // How Windows can report the click that brings the popover to the foreground: inactive,
+        // then active again, both before either is handled.
+        cx.update(|window, cx| {
+            other_window
+                .update(cx, |_, other, _| other.activate_window())
+                .unwrap();
+            window.activate_window();
+        });
+        cx.run_until_parked();
+
+        popover.update_in(cx, |popover, window, cx| popover.show_locations(window, cx));
+        cx.run_until_parked();
+        cx.simulate_input("perth");
+        cx.simulate_keystrokes("enter");
+        popover.update(cx, |popover, cx| popover.press_connect(cx));
+        cx.run_until_parked();
+
+        assert!(cx.windows().contains(&popover_window));
+        assert_eq!(page(&popover, cx), Page::Main);
+        assert_eq!(
+            *events.borrow(),
+            [
+                PopoverEvent::Select("au3".into()),
+                PopoverEvent::Connect("au3".into())
+            ]
+        );
     }
 
     #[gpui_kit::test]
