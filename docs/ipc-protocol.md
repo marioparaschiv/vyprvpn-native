@@ -9,6 +9,7 @@ The tray app and the helper talk over a local stream. The Rust types in `crates/
 | Windows service | named pipe `\\.\pipe\vyprlite` | SYSTEM and the user who installed VyprLite |
 | Windows `--console` helper | named pipe `\\.\pipe\vyprlite-console-<current user SID>` | SYSTEM and the current user |
 | macOS | Unix socket `/var/run/vyprlite.sock` | root and the user who installed VyprLite |
+| macOS `--console` helper | Unix socket `$TMPDIR/vyprlite-console.sock` | root and the current user |
 
 On Windows the pipe's DACL is `D:P(A;;GA;;;SY)(A;;GRGW;;;<owner SID>)`, and remote clients are rejected. The service learns the owner SID from its command line: `vyprlite-helper --service --owner-sid <SID>`.
 
@@ -104,4 +105,6 @@ Before sending anything, the tray app checks who serves the pipe, since the help
 
 The tray app connects, sends `status` and `account`, then follows the events. It sends `locations` until it has the list, retrying a failed fetch after 1 s, doubling up to 30 s. When the connection drops, or the pipe does not exist, it shows "Helper not running", starts the manual-start service `VyprLiteHelper` through the Service Control Manager (not in `--console` mode), and reconnects with a backoff from 250 ms up to 2 s.
 
-The helper listens on the pipe before doing anything else, and exits once no client has been connected for 5 s.
+The helper listens on the pipe before doing anything else, and exits once no client has been connected and no tunnel has been up for 5 s.
+
+On macOS the tray app checks the socket server's uid instead: root, or for a `--console` helper the current user. When nothing answers on `/var/run/vyprlite.sock`, it touches `/var/db/vyprlite.wake`, which makes launchd start the daemon.
