@@ -1,4 +1,4 @@
-//! The menu bar shows Safari's compass from SF Symbols. Apple licenses the symbols for use on its
+//! The menu bar shows a padlock from SF Symbols. Apple licenses the symbols for use on its
 //! platforms only, so AppKit draws them at runtime rather than the app shipping them.
 
 #![allow(unsafe_code)]
@@ -6,7 +6,10 @@
 use std::{ptr, slice};
 
 use objc2::AllocAnyThread;
-use objc2_app_kit::{NSBitmapImageRep, NSDeviceRGBColorSpace, NSGraphicsContext, NSImage};
+use objc2_app_kit::{
+    NSBitmapImageRep, NSDeviceRGBColorSpace, NSFontWeightBold, NSGraphicsContext, NSImage,
+    NSImageSymbolConfiguration,
+};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use tray_icon::Icon;
 
@@ -18,17 +21,24 @@ const SCALE: f64 = 2.;
 /// About the height of the system's own menu bar symbols.
 const SYMBOL_HEIGHT: f64 = 16.;
 
-/// The compass outlined while disconnected or busy, filled once connected. tray-icon draws it as a
-/// template, so it follows the menu bar's colour.
+/// An open padlock while disconnected or busy, a closed filled one once connected. tray-icon draws
+/// it as a template, so it follows the menu bar's colour.
 pub fn icon(kind: IconKind) -> Result<Icon, IconError> {
     let name = match kind {
-        IconKind::Disconnected | IconKind::Busy => "safari",
-        IconKind::Connected => "safari.fill",
+        IconKind::Disconnected | IconKind::Busy => "lock.open",
+        IconKind::Connected => "lock.fill",
     };
     let symbol = NSImage::imageWithSystemSymbolName_accessibilityDescription(
         &NSString::from_str(name),
         None,
     )
+    .and_then(|symbol| {
+        // SAFETY: AppKit defines the weight constants for the life of the process.
+        let weight = unsafe { NSFontWeightBold };
+        symbol.imageWithSymbolConfiguration(
+            &NSImageSymbolConfiguration::configurationWithPointSize_weight(SYMBOL_HEIGHT, weight),
+        )
+    })
     .ok_or(IconError::MissingSymbol(name))?;
 
     render(&symbol)
