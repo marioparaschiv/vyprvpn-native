@@ -26,7 +26,7 @@ const SERVICE_DISPLAY_NAME: &str = "VyprVPN Helper";
 const HELPER_EXE: &str = "vyprvpn-helper.exe";
 /// The tunnel loads it from the helper's folder.
 const WIREGUARD_DLL: &str = "wireguard.dll";
-const TRAY_EXE: &str = "VyprVPN.exe";
+pub(super) const TRAY_EXE: &str = "VyprVPN.exe";
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const AUTOSTART_VALUE: &str = "VyprVPN";
 const APP_ID_KEYS: &str = r"Software\Classes\AppUserModelId";
@@ -239,7 +239,7 @@ fn elevated_service_manager() -> Result<ServiceManager, InstallError> {
     })
 }
 
-fn system_root() -> Result<PathBuf, InstallError> {
+pub(super) fn system_root() -> Result<PathBuf, InstallError> {
     env::var_os("SystemRoot")
         .map(PathBuf::from)
         .ok_or(InstallError::MissingSystemRoot)

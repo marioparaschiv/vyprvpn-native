@@ -65,6 +65,7 @@ How the DLL is fetched:
 1. `xcopy /e /i dist "C:\Program Files\VyprVPN"`
 2. `cd /d "C:\Program Files\VyprVPN"`
 3. `vyprvpn-helper.exe install`
+4. Optional: `vyprvpn-helper.exe shortcut` puts a VyprVPN shortcut on your desktop.
 
 > **Folder permission check:** install refuses any folder that anyone except SYSTEM, Administrators and TrustedInstaller can change. That includes `dist\` itself. It also refuses if anyone else could rename a folder above it.
 

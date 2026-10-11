@@ -3,6 +3,7 @@ mod install;
 mod install_dir;
 mod security;
 mod service;
+mod shortcut;
 mod wireguard;
 
 use std::env;
@@ -27,6 +28,7 @@ enum Command {
     Run(Mode),
     Install,
     Uninstall,
+    Shortcut,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +41,9 @@ enum Mode {
 
 #[derive(Debug, thiserror::Error)]
 pub enum HelperError {
-    #[error("usage: vyprvpn-helper install | uninstall | --console | --service --owner-sid <SID>")]
+    #[error(
+        "usage: vyprvpn-helper install | uninstall | shortcut | --console | --service --owner-sid <SID>"
+    )]
     Usage,
     #[error(transparent)]
     InvalidSid(#[from] InvalidSid),
@@ -63,6 +67,8 @@ pub enum HelperError {
     Api(#[from] vypr_api::Error),
     #[error(transparent)]
     Install(#[from] install::InstallError),
+    #[error(transparent)]
+    Shortcut(#[from] shortcut::ShortcutError),
 }
 
 pub fn run() -> Result<(), HelperError> {
@@ -70,6 +76,7 @@ pub fn run() -> Result<(), HelperError> {
         Command::Run(mode) => mode,
         Command::Install => return Ok(install::install()?),
         Command::Uninstall => return Ok(install::uninstall()?),
+        Command::Shortcut => return Ok(shortcut::create()?),
     };
     let data_dir = data_dir()?;
     init_logging(&data_dir, matches!(mode, Mode::Service { .. })).map_err(HelperError::LogFile)?;
@@ -86,6 +93,7 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Help
     match (next().as_deref(), next().as_deref(), next(), next()) {
         (Some("install"), None, ..) => Ok(Command::Install),
         (Some("uninstall"), None, ..) => Ok(Command::Uninstall),
+        (Some("shortcut"), None, ..) => Ok(Command::Shortcut),
         (Some("--console"), None, ..) => Ok(Command::Run(Mode::Console)),
         (Some("--service"), Some("--owner-sid"), Some(owner), None) => {
             Ok(Command::Run(Mode::Service {
@@ -181,6 +189,7 @@ mod tests {
             parse_command(args("uninstall")).unwrap(),
             Command::Uninstall
         );
+        assert_eq!(parse_command(args("shortcut")).unwrap(), Command::Shortcut);
         assert_eq!(
             parse_command(args("--console")).unwrap(),
             Command::Run(Mode::Console)
