@@ -42,14 +42,9 @@ impl LocationList {
         }
     }
 
-    /// Takes effect with the next search, which the owner runs after this.
     pub fn set_locations(&mut self, locations: Vec<Location>) {
         self.locations = locations;
-    }
-
-    /// The text the list was last narrowed by.
-    pub fn query(&self) -> &str {
-        &self.query
+        self.search(&self.query.clone());
     }
 
     pub fn set_chosen(&mut self, spoke_id: Option<&str>) {

@@ -26,6 +26,7 @@ use gpui_kit::*;
 
 use crate::helper_link::{HelperState, LinkState, Locations};
 use crate::{flags, theme};
+use anchor::Anchor;
 use location_list::LocationList;
 use model::{ConnectAction, Detail, Headline, LocationRow, Tone};
 
@@ -78,19 +79,17 @@ impl Popover {
         )
     }
 
-    /// Opens the window at `origin` in the logical pixels of `display`, or of the primary display.
     pub fn open(
         cx: &mut App,
-        display: Option<DisplayId>,
-        origin: Point<Pixels>,
+        anchor: Anchor,
         state: LinkState,
     ) -> Result<(AnyWindowHandle, Entity<Self>)> {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
-                origin,
+                origin: anchor.origin,
                 size: Self::window_size(),
             })),
-            display_id: display,
+            display_id: anchor.display,
             titlebar: None,
             kind: WindowKind::PopUp,
             is_movable: false,
@@ -142,21 +141,17 @@ impl Popover {
             _ticks: None,
             _subscriptions,
         };
-        popover.set_state(state, window, cx);
+        popover.set_state(state, cx);
 
         popover
     }
 
-    pub fn set_state(&mut self, state: LinkState, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_state(&mut self, state: LinkState, cx: &mut Context<Self>) {
         if state.locations != self.state.locations {
-            let loaded = match &state.locations {
-                Locations::Loaded(locations) => locations.clone(),
-                Locations::Loading | Locations::Failed(_) => Vec::new(),
-            };
+            let loaded = state.locations.loaded().to_vec();
             self.locations.update(cx, |list, cx| {
                 list.delegate_mut().set_locations(loaded);
-                let query = list.delegate().query().to_owned();
-                list.set_query(&query, window, cx);
+                cx.notify();
             });
         }
 
@@ -164,16 +159,18 @@ impl Popover {
             state.helper,
             HelperState::Running(ipc::Status::Connected { .. })
         );
-        self._ticks = connected.then(|| {
-            cx.spawn(async move |this, cx| {
+        if !connected {
+            self._ticks = None;
+        } else if self._ticks.is_none() {
+            self._ticks = Some(cx.spawn(async move |this, cx| {
                 loop {
                     cx.background_executor().timer(Duration::from_secs(1)).await;
                     if this.update(cx, |_, cx| cx.notify()).is_err() {
                         break;
                     }
                 }
-            })
-        });
+            }));
+        }
 
         self.state = state;
         cx.notify();
@@ -332,7 +329,7 @@ impl Popover {
                 .child(div().text_color(cx.theme().muted_foreground).child(label))
                 .child(value)
         };
-        let location = model::find(&self.state.locations, spoke_id);
+        let location = self.state.locations.find(spoke_id);
 
         v_flex()
             .w_full()
@@ -350,9 +347,11 @@ impl Popover {
                         }),
                     )
                     .child(
-                        div()
-                            .text_ellipsis()
-                            .child(model::name(&self.state.locations, spoke_id).to_owned()),
+                        div().text_ellipsis().child(
+                            location
+                                .map_or(spoke_id, |location| &location.name)
+                                .to_owned(),
+                        ),
                     )
                     .into_any_element(),
             ))
@@ -478,6 +477,21 @@ impl Render for Popover {
     }
 }
 
+/// The locations VyprVPN listed when the fixture was recorded.
+#[cfg(any(debug_assertions, test))]
+fn recorded_locations() -> std::result::Result<Vec<ipc::Location>, ipc::CodecError> {
+    #[derive(serde::Deserialize)]
+    struct LocationsResponse {
+        locations: Vec<ipc::Location>,
+    }
+
+    let response: LocationsResponse = ipc::decode(include_str!(
+        "../../../vypr-api/tests/fixtures/locations.json"
+    ))?;
+
+    Ok(response.locations)
+}
+
 /// The country's cached flag, or a neutral placeholder of the same size while it is missing.
 fn flag(flag_dir: Option<&Path>, country_code: &str, cx: &App) -> AnyElement {
     let muted = cx.theme().muted;
@@ -489,7 +503,11 @@ fn flag(flag_dir: Option<&Path>, country_code: &str, cx: &App) -> AnyElement {
             .bg(muted)
             .into_any_element()
     };
-    let path = flag_dir.and_then(|dir| Some(dir.join(flags::file_name(country_code).ok()?)));
+    // GPUI remembers a failed image load for the life of the app, so a flag still downloading
+    // must not be loaded yet.
+    let path = flag_dir
+        .and_then(|dir| Some(dir.join(flags::file_name(country_code).ok()?)))
+        .filter(|path| path.is_file());
 
     h_flex()
         .size_5()
@@ -513,22 +531,13 @@ mod tests {
 
     use gpui_kit::component::IndexPath;
     use gpui_kit::{Entity, TestAppContext, VisualTestContext};
-    use ipc::{Location, Reply, Status};
+    use ipc::Status;
 
     use gpui_kit::component::list::ListDelegate;
 
-    use super::{Page, Popover, PopoverEvent, init};
+    use super::{Page, Popover, PopoverEvent, init, recorded_locations};
     use crate::helper_link::{HelperState, LinkState, Locations};
     use crate::popover::model::tests::state;
-
-    const LOCATIONS: &str = include_str!("../../../vypr-api/tests/fixtures/locations.json");
-
-    fn recorded_locations() -> Vec<Location> {
-        let Reply::Locations(locations) = ipc::decode(LOCATIONS).unwrap() else {
-            panic!("the fixture is a locations reply");
-        };
-        locations
-    }
 
     fn disconnected() -> LinkState {
         let mut state = state(
@@ -538,7 +547,7 @@ mod tests {
             },
             None,
         );
-        state.locations = Locations::Loaded(recorded_locations());
+        state.locations = Locations::Loaded(recorded_locations().unwrap());
         state
     }
 
@@ -677,8 +686,8 @@ mod tests {
             tunnel_ip: [10, 1, 2, 3].into(),
             connected_at: 1_760_140_800,
         });
-        popover.update_in(cx, |popover, window, cx| {
-            popover.set_state(connected, window, cx);
+        popover.update(cx, |popover, cx| {
+            popover.set_state(connected, cx);
             popover.press_connect(cx);
         });
 

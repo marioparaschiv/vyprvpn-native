@@ -1,17 +1,18 @@
 //! `VYPRLITE_DEV_POPOVER=disconnected|connecting|connected|error|subpage` opens the popover on
 //! made-up state in debug builds, for screenshots and trying it out without a helper.
 
+use std::cell::Cell;
 use std::process::ExitCode;
+use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use gpui_kit::*;
-use ipc::{Account, Reply, Status};
+use ipc::{Account, Status};
 
-use super::{Popover, PopoverEvent};
+use super::anchor::Anchor;
+use super::{Popover, PopoverEvent, recorded_locations};
 use crate::helper_link::{HelperState, LinkState, Locations};
 use crate::theme;
-
-const LOCATIONS: &str = include_str!("../../../vypr-api/tests/fixtures/locations.json");
 
 #[derive(Debug, thiserror::Error)]
 pub enum DevError {
@@ -21,42 +22,70 @@ pub enum DevError {
     Page(String),
     #[error("the bundled locations fixture is malformed: {0}")]
     Fixture(#[from] ipc::CodecError),
-    #[error("the bundled locations fixture is not a locations reply")]
-    NotLocations,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Preview {
+    Disconnected,
+    Connecting,
+    Connected,
+    Error,
+    Subpage,
+}
+
+impl Preview {
+    fn parse(page: &str) -> Result<Self, DevError> {
+        match page {
+            "disconnected" => Ok(Self::Disconnected),
+            "connecting" => Ok(Self::Connecting),
+            "connected" => Ok(Self::Connected),
+            "error" => Ok(Self::Error),
+            "subpage" => Ok(Self::Subpage),
+            other => Err(DevError::Page(other.to_owned())),
+        }
+    }
 }
 
 pub fn run(page: &str) -> ExitCode {
-    let state = match state(page) {
-        Ok(state) => state,
+    let prepared = Preview::parse(page).and_then(|preview| Ok((preview, state(preview)?)));
+    let (preview, state) = match prepared {
+        Ok(prepared) => prepared,
         Err(error) => {
             log::error!("{error}");
             return ExitCode::FAILURE;
         }
     };
-    let subpage = page == "subpage";
+    let failed = Rc::new(Cell::new(false));
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
-        .run(move |cx| {
-            gpui_kit::init(cx);
-            super::init(cx);
-            if let Err(error) = theme::follow_system(cx) {
-                log::warn!("{error}");
-            }
-            cx.on_window_closed(|cx, _| cx.quit()).detach();
+        .run({
+            let failed = failed.clone();
+            move |cx| {
+                gpui_kit::init(cx);
+                super::init(cx);
+                if let Err(error) = theme::follow_system(cx) {
+                    log::warn!("{error}");
+                }
+                cx.on_window_closed(|cx, _| cx.quit()).detach();
 
-            if let Err(error) = open(cx, state, subpage) {
-                log::error!("opening the popover failed: {error:#}");
-                cx.quit();
+                if let Err(error) = open(cx, state, preview == Preview::Subpage) {
+                    log::error!("opening the popover failed: {error:#}");
+                    failed.set(true);
+                    cx.quit();
+                }
             }
         });
 
-    ExitCode::SUCCESS
+    if failed.get() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn open(cx: &mut App, state: LinkState, subpage: bool) -> Result<()> {
-    let origin = Bounds::centered(None, Popover::window_size(), cx).origin;
-    let (window, popover) = Popover::open(cx, None, origin, state)?;
+    let (window, popover) = Popover::open(cx, Anchor::centred(cx), state)?;
 
     if subpage {
         window.update(cx, |_, window, cx| {
@@ -82,32 +111,31 @@ fn open(cx: &mut App, state: LinkState, subpage: bool) -> Result<()> {
             }
         }
 
-        window
-            .update(cx, |_, window, cx| {
-                popover.update(cx, |popover, cx| popover.set_state(state, window, cx));
-            })
-            .ok();
+        let shown = window.update(cx, |_, _, cx| {
+            popover.update(cx, |popover, cx| popover.set_state(state, cx));
+        });
+        if let Err(error) = shown {
+            log::debug!("the popover closed before showing the new state: {error}");
+        }
     })
     .detach();
 
     Ok(())
 }
 
-fn state(page: &str) -> Result<LinkState, DevError> {
-    let Reply::Locations(locations) = ipc::decode(LOCATIONS)? else {
-        return Err(DevError::NotLocations);
-    };
+fn state(preview: Preview) -> Result<LinkState, DevError> {
+    let locations = recorded_locations()?;
     let spoke_id = || "de1".to_owned();
 
-    let status = match page {
-        "disconnected" | "subpage" => Status::Disconnected {
+    let status = match preview {
+        Preview::Disconnected | Preview::Subpage => Status::Disconnected {
             last_spoke_id: Some(spoke_id()),
             error: None,
         },
-        "connecting" => Status::Connecting {
+        Preview::Connecting => Status::Connecting {
             spoke_id: spoke_id(),
         },
-        "connected" => Status::Connected {
+        Preview::Connected => Status::Connected {
             spoke_id: spoke_id(),
             tunnel_ip: [10, 1, 2, 3].into(),
             connected_at: (SystemTime::now() - Duration::from_secs(754))
@@ -115,11 +143,10 @@ fn state(page: &str) -> Result<LinkState, DevError> {
                 .unwrap_or_default()
                 .as_secs(),
         },
-        "error" => Status::Disconnected {
+        Preview::Error => Status::Disconnected {
             last_spoke_id: Some(spoke_id()),
             error: Some("The VPN server did not answer the handshake.".to_owned()),
         },
-        other => return Err(DevError::Page(other.to_owned())),
     };
 
     Ok(LinkState {

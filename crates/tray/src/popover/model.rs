@@ -24,39 +24,37 @@ pub enum ConnectAction {
 }
 
 pub fn connect_button(state: &LinkState) -> ConnectButton {
-    let idle = |label: &str, action| ConnectButton {
-        label: label.to_owned(),
-        action,
-        busy: false,
+    let logged_in = matches!(state.account, Some(Account::LoggedIn { .. }));
+    let busy = match &state.helper {
+        HelperState::Running(Status::Connecting { .. }) if logged_in => Some("Connecting…"),
+        HelperState::Running(Status::Disconnecting { .. }) if logged_in => Some("Disconnecting…"),
+        _ => None,
     };
-    let busy = |label: &str| ConnectButton {
-        label: label.to_owned(),
-        action: None,
-        busy: true,
-    };
-
-    let HelperState::Running(status) = &state.helper else {
-        return idle("Connect", None);
-    };
-    if !matches!(state.account, Some(Account::LoggedIn { .. })) {
-        return idle("Connect", None);
+    if let Some(label) = busy {
+        return ConnectButton {
+            label: label.to_owned(),
+            action: None,
+            busy: true,
+        };
     }
 
-    let target = state.selected_spoke_id();
-    match status {
-        Status::Connecting { .. } => busy("Connecting…"),
-        Status::Disconnecting { .. } => busy("Disconnecting…"),
-        Status::Connected { spoke_id, .. } => match target {
-            Some(target) if target != spoke_id => idle(
-                &format!("Switch to {}", name(&state.locations, target)),
-                Some(ConnectAction::Connect(target.to_owned())),
-            ),
-            _ => idle("Disconnect", Some(ConnectAction::Disconnect)),
-        },
-        Status::Disconnected { .. } => idle(
-            "Connect",
-            target.map(|target| ConnectAction::Connect(target.to_owned())),
+    let (label, action) = match (state.connect_target(), state.can_disconnect()) {
+        (Some(target), true) => (
+            format!("Switch to {}", state.locations.name(target)),
+            Some(ConnectAction::Connect(target.to_owned())),
         ),
+        (Some(target), false) => (
+            "Connect".to_owned(),
+            Some(ConnectAction::Connect(target.to_owned())),
+        ),
+        (None, true) => ("Disconnect".to_owned(), Some(ConnectAction::Disconnect)),
+        (None, false) => ("Connect".to_owned(), None),
+    };
+
+    ConnectButton {
+        label,
+        action,
+        busy: false,
     }
 }
 
@@ -102,7 +100,7 @@ pub fn headline(state: &LinkState) -> Headline {
             return headline(
                 Tone::Failed,
                 "Helper not running",
-                "VyprLite is starting its helper.".to_owned(),
+                "Waiting for the VyprLite helper.".to_owned(),
             );
         }
         HelperState::StartFailed(reason) => {
@@ -130,12 +128,12 @@ pub fn headline(state: &LinkState) -> Headline {
         Status::Connecting { spoke_id } => headline(
             Tone::Busy,
             "Connecting…",
-            name(&state.locations, spoke_id).to_owned(),
+            state.locations.name(spoke_id).to_owned(),
         ),
         Status::Disconnecting { spoke_id } => headline(
             Tone::Busy,
             "Disconnecting…",
-            name(&state.locations, spoke_id).to_owned(),
+            state.locations.name(spoke_id).to_owned(),
         ),
         Status::Connected {
             spoke_id,
@@ -168,23 +166,9 @@ pub fn location_row(state: &LinkState) -> LocationRow<'_> {
         Locations::Failed(reason) => LocationRow::Failed(reason),
         Locations::Loaded(_) => state
             .selected_spoke_id()
-            .and_then(|spoke_id| find(&state.locations, spoke_id))
+            .and_then(|spoke_id| state.locations.find(spoke_id))
             .map_or(LocationRow::Empty, LocationRow::Selected),
     }
-}
-
-pub fn find<'a>(locations: &'a Locations, spoke_id: &str) -> Option<&'a Location> {
-    match locations {
-        Locations::Loaded(locations) => locations
-            .iter()
-            .find(|location| location.spoke_id == spoke_id),
-        Locations::Loading | Locations::Failed(_) => None,
-    }
-}
-
-/// The location's name, or its spoke id while the locations are unknown.
-pub fn name<'a>(locations: &'a Locations, spoke_id: &'a str) -> &'a str {
-    find(locations, spoke_id).map_or(spoke_id, |location| &location.name)
 }
 
 /// How long the tunnel has been up, as `m:ss` or `h:mm:ss`. A clock behind `connected_at` reads
@@ -431,12 +415,18 @@ pub(super) mod tests {
     fn headline_explains_a_missing_helper_or_login() {
         let mut logged_out = state(disconnected(None, None), None);
         logged_out.account = Some(Account::LoggedOut);
+        let mut not_running = state(disconnected(None, None), None);
+        not_running.helper = HelperState::NotRunning;
         let mut start_failed = state(disconnected(None, None), None);
         start_failed.helper = HelperState::StartFailed("access denied".into());
 
         assert_eq!(
             headline(&logged_out).detail,
             Detail::Text("Log in from the tray menu to connect.".into())
+        );
+        assert_eq!(
+            headline(&not_running).detail,
+            Detail::Text("Waiting for the VyprLite helper.".into())
         );
         assert_eq!(
             headline(&start_failed),

@@ -1,10 +1,10 @@
 //! Where the popover window opens for a click on the tray icon, converted from the physical pixels
 //! the click reports to the logical pixels GPUI places windows in.
 
-use gpui_kit::{App, DisplayId, Pixels, Point, point, px};
+use gpui_kit::{App, Bounds, DisplayId, Pixels, Point, point, px};
 use placement::{LogicalSize, PhysicalRect};
 
-use super::{CARD, SHADOW_MARGIN};
+use super::{CARD, Popover, SHADOW_MARGIN};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AnchorError {
@@ -40,6 +40,16 @@ pub struct Monitor {
 pub struct Anchor {
     pub display: Option<DisplayId>,
     pub origin: Point<Pixels>,
+}
+
+impl Anchor {
+    /// The middle of the primary display.
+    pub fn centred(cx: &App) -> Self {
+        Self {
+            display: None,
+            origin: Bounds::centered(None, Popover::window_size(), cx).origin,
+        }
+    }
 }
 
 pub fn icon_rect(rect: tray_icon::Rect) -> PhysicalRect {
@@ -257,7 +267,7 @@ mod tests {
             Anchor {
                 display: Some(DisplayId::new(1)),
                 // The card at physical (1263, 378) is logical (842, 252).
-                origin: point(px(842. - 16.), px(252. - 16.)),
+                origin: point(px(842.) - SHADOW_MARGIN, px(252.) - SHADOW_MARGIN),
             }
         );
     }
@@ -330,7 +340,13 @@ mod tests {
 
         // A 22-point icon at x = 1200 points, as tray-icon reports it at 2x.
         let anchor = anchor(rect(2400, 0, 44, 50), &monitor);
-        assert_eq!(anchor.origin, point(px(1211. - 170. - 16.), px(25. - 16.)));
+        assert_eq!(
+            anchor.origin,
+            point(
+                px(1211.) - CARD.width / 2. - SHADOW_MARGIN,
+                px(25.) - SHADOW_MARGIN
+            )
+        );
     }
 
     #[test]
@@ -351,7 +367,10 @@ mod tests {
         let anchor = anchor(rect(3000, -1080, 30, 25), &monitor);
         assert_eq!(
             anchor.origin,
-            point(px(3015. - 170. - 16.), px(-1055. - 16.))
+            point(
+                px(3015.) - CARD.width / 2. - SHADOW_MARGIN,
+                px(-1055.) - SHADOW_MARGIN
+            )
         );
     }
 
