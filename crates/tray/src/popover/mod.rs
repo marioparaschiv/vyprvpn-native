@@ -8,6 +8,7 @@ pub mod dev;
 mod foreground;
 mod location_list;
 mod model;
+mod smooth_scroll;
 pub mod toggle;
 
 use std::path::{Path, PathBuf};
@@ -31,6 +32,7 @@ use crate::{flags, theme};
 use anchor::Anchor;
 use location_list::LocationList;
 use model::{ConnectAction, Detail, Headline, LocationRow, Tone};
+use smooth_scroll::SmoothScroll;
 
 const CONTEXT: &str = "LocationPopover";
 
@@ -447,13 +449,15 @@ impl Popover {
                     )
                     .child(div().font_semibold().child("Locations")),
             )
-            .child(
+            .child(SmoothScroll::new(
+                "locations-scroll",
+                self.locations.read(cx).scroll_handle(),
                 List::new(&self.locations)
                     .flex_1()
                     .min_h_0()
                     .pb_2()
                     .search_placeholder("Search locations"),
-            )
+            ))
     }
 }
 
