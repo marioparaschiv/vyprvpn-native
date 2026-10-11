@@ -40,6 +40,9 @@ objc2.workspace = true
 objc2-app-kit = { workspace = true, features = ["NSBitmapImageRep", "NSEvent", "NSFontDescriptor", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSScreen"] }
 objc2-foundation.workspace = true
 
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true
+
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true

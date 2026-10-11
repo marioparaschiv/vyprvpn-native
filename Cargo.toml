@@ -57,6 +57,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 raw-window-handle = { version = "0.6.2", features = ["std"] }
 globe = { path = "crates/globe" }
 image = { version = "0.25.10", default-features = false }
+winresource = "0.1.31"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

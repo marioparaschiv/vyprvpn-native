@@ -45,7 +45,7 @@ cargo xtask dist
 
 This writes `dist/` with:
 
-- `VyprVPN.exe` (release build)
+- `VyprVPN.exe` (release build, with the VyprVPN icon)
 - `vyprvpn-helper.exe` (release build)
 - `wireguard.dll` (official WireGuardNT 1.1, amd64)
 
