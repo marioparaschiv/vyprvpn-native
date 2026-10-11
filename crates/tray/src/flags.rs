@@ -1,21 +1,19 @@
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
 use std::thread;
 
+use ipc::Location;
 use tokio::task::JoinSet;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FlagError {
     #[error("{0:?} is not a three-letter country code")]
     CountryCode(String),
-    #[cfg(windows)]
-    #[error("environment variable LOCALAPPDATA is not set")]
-    MissingLocalAppData,
-    #[cfg(target_os = "macos")]
-    #[error("environment variable HOME is not set")]
-    MissingHome,
+    #[error("environment variable {0} is not set")]
+    MissingEnv(&'static str),
     #[error("accessing {path} failed: {source}")]
     Cache { path: PathBuf, source: io::Error },
     #[error("downloading the flag failed: {0}")]
@@ -26,7 +24,11 @@ pub enum FlagError {
 
 /// Downloads each country's flag that is not cached yet, on a background thread. A flag that fails
 /// is logged and tried again on the next start.
-pub fn cache(country_codes: Vec<String>) -> io::Result<()> {
+pub fn cache(locations: &[Location]) -> io::Result<()> {
+    let country_codes: BTreeSet<String> = locations
+        .iter()
+        .map(|location| location.country_code.clone())
+        .collect();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -38,7 +40,7 @@ pub fn cache(country_codes: Vec<String>) -> io::Result<()> {
     Ok(())
 }
 
-async fn cache_all(country_codes: Vec<String>) {
+async fn cache_all(country_codes: BTreeSet<String>) {
     let api = match vypr_api::Client::new(vypr_api::DEFAULT_BASE_URL) {
         Ok(api) => api,
         Err(error) => return log::warn!("cannot download flags: {error}"),
@@ -82,12 +84,12 @@ pub fn cache_dir() -> Result<PathBuf, FlagError> {
 fn caches_root() -> Result<PathBuf, FlagError> {
     env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
-        .ok_or(FlagError::MissingLocalAppData)
+        .ok_or(FlagError::MissingEnv("LOCALAPPDATA"))
 }
 
 #[cfg(target_os = "macos")]
 fn caches_root() -> Result<PathBuf, FlagError> {
-    let home = env::var_os("HOME").ok_or(FlagError::MissingHome)?;
+    let home = env::var_os("HOME").ok_or(FlagError::MissingEnv("HOME"))?;
 
     Ok(PathBuf::from(home).join("Library").join("Caches"))
 }
@@ -107,14 +109,23 @@ async fn cache_one(
     cache_dir: &Path,
     country_code: &str,
 ) -> Result<(), FlagError> {
-    let path = cache_dir.join(file_name(country_code)?);
+    let file_name = file_name(country_code)?;
+    let path = cache_dir.join(&file_name);
     if path.exists() {
         return Ok(());
     }
 
     let png = api.flag(country_code).await?;
     validate(&png)?;
-    fs::write(&path, png).map_err(|source| FlagError::Cache { path, source })
+
+    // Renaming into place is atomic, so a crash mid-write cannot leave a truncated flag that
+    // passes for cached.
+    let partial = cache_dir.join(format!("{file_name}.part"));
+    fs::write(&partial, png).map_err(|source| FlagError::Cache {
+        path: partial.clone(),
+        source,
+    })?;
+    fs::rename(&partial, &path).map_err(|source| FlagError::Cache { path, source })
 }
 
 /// Decodes the whole image, so a truncated or bogus download is never cached.
