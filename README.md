@@ -1,70 +1,145 @@
-# VyprLite
-
-A minimal VyprVPN client: an unprivileged tray app (`VyprLite`) and a privileged helper (`vyprlite-helper`).
-
-## Build
+# vyprvpn-native
 
 ```sh
 cargo build --workspace
 ```
 
-Binaries land in `target/debug/`. Run the tests with `cargo test --workspace`.
+Binaries land in `target/debug/`.
 
-## Build a distributable
+## What it is
 
-```sh
-cargo xtask dist
-```
+- A minimal VyprVPN client.
+- `VyprLite`: the tray app. Runs unprivileged.
+- `vyprlite-helper`: the privileged helper.
 
-This builds the tray app and helper in release and writes `dist/` with `VyprLite.exe`, `vyprlite-helper.exe` and the official `wireguard.dll` (WireGuardNT 1.1, amd64). The DLL comes from the WireGuardNT zip on download.wireguard.com, cached under `target/wireguard-nt/`. The build fails unless the zip matches the pinned SHA256 and the DLL carries a valid Authenticode signature from WireGuard LLC. Never commit the DLL.
+<p align="center">
+  <img src="docs/screenshots/disconnected.png" alt="Disconnected" width="32%">
+  <img src="docs/screenshots/secured.png" alt="Secured" width="32%">
+  <img src="docs/screenshots/locations.png" alt="Locations" width="32%">
+</p>
 
-## Run unelevated for development
+## Quick start
+
+1. Build: `cargo build --workspace`
+2. Test: `cargo test --workspace`
+3. Run the helper: `target/debug/vyprlite-helper --console`
+4. Run the tray app: `target/debug/VyprLite --console`
+
+## Run for development
 
 ```sh
 target/debug/vyprlite-helper --console
 target/debug/VyprLite --console
 ```
 
-Both use a pipe only the current user can reach, so they never touch an installed service. The console helper exits 5 s after the last tray app disconnects.
+- No elevation needed.
+- Both use a pipe only the current user can reach.
+- They never touch an installed service.
+- The console helper exits 5 s after the last tray app disconnects.
 
-## Install
-
-From an elevated prompt, as the user who will use VyprLite, copy the folder `cargo xtask dist` wrote to `C:\Program Files\VyprLite` and install from there:
-
-```bat
-xcopy /e /i dist "C:\Program Files\VyprLite"
-cd /d "C:\Program Files\VyprLite"
-vyprlite-helper.exe install
-```
-
-The service runs `vyprlite-helper.exe` and loads `wireguard.dll` as SYSTEM, so install refuses a folder that anyone but SYSTEM, Administrators and TrustedInstaller can change, including `dist\` itself. It also refuses when anyone else could rename a folder above it.
-
-This registers the `VyprLiteHelper` service (manual start, LocalSystem), lets you start it and query it without elevation, and starts `VyprLite.exe` unelevated at your next login. The tray app starts the service itself, and the service stops 5 s after the tray app exits unless a tunnel is up. Run it again after moving the folder. The service logs to `helper.log`, records panics in `crash.log` and keeps the encrypted login in `credentials.bin` under `%SystemRoot%\System32\config\systemprofile\AppData\Local\VyprLite`.
-
-### macOS
-
-From your own account, in the folder holding `vyprlite-helper` and `VyprLite` (e.g. `target/release` after `cargo build --release`):
+## Build a distributable (Windows)
 
 ```sh
-sudo ./vyprlite-helper install
+cargo xtask dist
 ```
 
-This copies the helper to `/Library/PrivilegedHelperTools/com.vyprlite.helper` and the tray app to `/usr/local/libexec/vyprlite/VyprLite`, both root-owned so no other account can replace what root runs. It loads the `com.vyprlite.helper` launch daemon, which runs as root only on demand: the tray app touches `/var/db/vyprlite.wake` (writable only by you) to start it, and it exits 5 s after the tray app does unless a tunnel is up. Only root and you can connect to its socket, `/var/run/vyprlite.sock`. A launch agent in `~/Library/LaunchAgents` starts the tray app at your next login. The helper logs to `helper.log`, records panics in `crash.log` and keeps the login in `credentials.json` (mode 0600) under `/Library/Application Support/VyprLite`, which only root can open.
+This writes `dist/` with:
+
+- `VyprLite.exe` (release build)
+- `vyprlite-helper.exe` (release build)
+- `wireguard.dll` (official WireGuardNT 1.1, amd64)
+
+> **Never commit the DLL.**
+
+How the DLL is fetched:
+
+- Source: the WireGuardNT zip on download.wireguard.com.
+- Cached under `target/wireguard-nt/`.
+- The build fails unless the zip matches the pinned SHA256.
+- The build fails unless the DLL has a valid Authenticode signature from WireGuard LLC.
+
+## Install (Windows)
+
+> **Needs an elevated prompt.** Run it as the user who will use VyprLite.
+
+1. `xcopy /e /i dist "C:\Program Files\VyprLite"`
+2. `cd /d "C:\Program Files\VyprLite"`
+3. `vyprlite-helper.exe install`
+
+> **Folder permission check:** install refuses any folder that anyone except SYSTEM, Administrators and TrustedInstaller can change. That includes `dist\` itself. It also refuses if anyone else could rename a folder above it.
+
+Why: the service runs `vyprlite-helper.exe` and loads `wireguard.dll` as SYSTEM.
+
+What install does:
+
+- Registers the `VyprLiteHelper` service (manual start, LocalSystem).
+- Lets you start and query the service without elevation.
+- Starts `VyprLite.exe` unelevated at your next login.
+
+At runtime:
+
+- The tray app starts the service itself.
+- The service stops 5 s after the tray app exits, unless a tunnel is up.
+
+> **Moved the folder?** Run `vyprlite-helper.exe install` again.
+
+## Install (macOS)
+
+> **Needs `sudo`.** Run it from your own account.
+
+1. `cargo build --release`
+2. `cd target/release` (or any folder holding `vyprlite-helper` and `VyprLite`)
+3. `sudo ./vyprlite-helper install`
+
+What install does:
+
+- Copies the helper to `/Library/PrivilegedHelperTools/com.vyprlite.helper` (root-owned).
+- Copies the tray app to `/usr/local/libexec/vyprlite/VyprLite` (root-owned).
+- Loads the `com.vyprlite.helper` launch daemon.
+- Adds a launch agent in `~/Library/LaunchAgents` that starts the tray app at your next login.
+
+Root ownership means no other account can replace what root runs.
+
+At runtime:
+
+- The daemon runs as root, only on demand.
+- The tray app touches `/var/db/vyprlite.wake` to start it. Only you can write that file.
+- The daemon exits 5 s after the tray app does, unless a tunnel is up.
+- Only root and you can connect to its socket, `/var/run/vyprlite.sock`.
 
 ## Uninstall
 
-From an elevated prompt:
+Both commands are safe to run twice.
+
+**Windows** (elevated prompt):
 
 ```bat
 vyprlite-helper.exe uninstall
 ```
 
-This disconnects the VPN, removes the service and the login autostart entry, and deletes that data directory with the stored login. Both commands are safe to run twice.
+- Disconnects the VPN.
+- Removes the service and the login autostart entry.
+- Deletes the data directory, including the stored login.
 
-### macOS
+**macOS:**
 
 ```sh
 sudo /Library/PrivilegedHelperTools/com.vyprlite.helper uninstall
 ```
 
-This disconnects the VPN, unloads the launch daemon, and removes both launch plists, the installed binaries, the wake file, the socket and `/Library/Application Support/VyprLite` with the stored login. Both commands are safe to run twice.
+- Disconnects the VPN and unloads the launch daemon.
+- Removes both launch plists and the installed binaries.
+- Removes the wake file and the socket.
+- Deletes `/Library/Application Support/VyprLite`, including the stored login.
+
+## Where things live
+
+| | Windows | macOS |
+| --- | --- | --- |
+| Data directory | `%SystemRoot%\System32\config\systemprofile\AppData\Local\VyprLite` | `/Library/Application Support/VyprLite` (only root can open it) |
+| Log | `helper.log` | `helper.log` |
+| Panics | `crash.log` | `crash.log` |
+| Stored login | `credentials.bin` (encrypted) | `credentials.json` (mode 0600) |
+| Helper binary | `C:\Program Files\VyprLite\vyprlite-helper.exe` | `/Library/PrivilegedHelperTools/com.vyprlite.helper` |
+| Tray app binary | `C:\Program Files\VyprLite\VyprLite.exe` | `/usr/local/libexec/vyprlite/VyprLite` |
+| Service | `VyprLiteHelper` | `com.vyprlite.helper` launch daemon |
