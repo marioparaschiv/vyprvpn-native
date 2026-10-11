@@ -2,10 +2,13 @@
 //! and the Connect button, with a subpage for picking the location.
 
 pub mod anchor;
+mod backdrop;
 #[cfg(debug_assertions)]
 pub mod dev;
 #[cfg(target_os = "windows")]
 mod foreground;
+#[cfg(target_os = "windows")]
+mod hwnd;
 mod location_list;
 mod model;
 mod presence;
@@ -23,7 +26,7 @@ use gpui_kit::component::input::Escape;
 use gpui_kit::component::list::{List, ListEvent, ListState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, ThemeStyled, h_flex, v_flex,
+    ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -31,6 +34,7 @@ use gpui_kit::*;
 use crate::helper_link::{HelperState, LinkState, Locations};
 use crate::{flags, theme};
 use anchor::Anchor;
+use backdrop::Surface;
 use location_list::LocationList;
 use model::{ConnectAction, Detail, Headline, LocationRow, Tone};
 use presence::{Presence, Side};
@@ -38,10 +42,8 @@ use smooth_scroll::SmoothScroll;
 
 const CONTEXT: &str = "LocationPopover";
 
-/// The card's size, without the transparent margin its shadow paints into.
+/// The card's size, which is the window's: the OS draws its shadow.
 const CARD: Size<Pixels> = size(px(340.), px(420.));
-/// Room around the card for its shadow; the window is this much larger on every side.
-const SHADOW_MARGIN: Pixels = px(16.);
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Cancel, Some(CONTEXT))]);
@@ -71,6 +73,7 @@ pub struct Popover {
     flag_dir: Option<PathBuf>,
     presence: Presence,
     toward_icon: Option<Side>,
+    surface: Surface,
     /// Redraws the connected-for time each second while connected.
     _ticks: Option<Task<()>>,
     /// Removes the window once the exit has played.
@@ -81,23 +84,16 @@ pub struct Popover {
 impl EventEmitter<PopoverEvent> for Popover {}
 
 impl Popover {
-    /// The window's size, including the margin around the card.
-    pub fn window_size() -> Size<Pixels> {
-        size(
-            CARD.width + SHADOW_MARGIN * 2.,
-            CARD.height + SHADOW_MARGIN * 2.,
-        )
-    }
-
     pub fn open(
         cx: &mut App,
         anchor: Anchor,
         state: LinkState,
     ) -> Result<(AnyWindowHandle, Entity<Self>)> {
+        let surface = Surface::current();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: anchor.origin,
-                size: Self::window_size(),
+                size: CARD,
             })),
             display_id: anchor.display,
             titlebar: None,
@@ -105,7 +101,7 @@ impl Popover {
             is_movable: false,
             is_resizable: false,
             is_minimizable: false,
-            window_background: WindowBackgroundAppearance::Transparent,
+            window_background: surface.window_background(),
             ..Default::default()
         };
 
@@ -115,15 +111,28 @@ impl Popover {
         let (window, popover) = gpui_kit::open_window(options, cx, |window, cx| {
             cx.new(|cx| Self {
                 toward_icon: anchor.toward_icon,
+                surface,
                 ..Self::new(state, flag_dir, window, cx)
             })
         })?;
         // `cx.activate` does nothing on Windows; there the window takes the foreground itself.
         cx.activate(true);
         #[cfg(target_os = "windows")]
-        if let Err(error) = window.update(cx, |_, window, _| foreground::take(window))? {
-            log::warn!("the popover may close on its first click: {error}");
-        }
+        window.update(cx, |_, window, cx| match hwnd::of(window) {
+            Ok(hwnd) => {
+                if let Err(error) = backdrop::apply(&hwnd, surface) {
+                    log::warn!("showing the solid card: {error}");
+                    popover.update(cx, |popover, cx| {
+                        popover.surface = Surface::Solid;
+                        cx.notify();
+                    });
+                }
+                if let Err(error) = foreground::take(&hwnd) {
+                    log::warn!("the popover may close on its first click: {error}");
+                }
+            }
+            Err(error) => log::warn!("the popover's window can't be styled or focused: {error}"),
+        })?;
 
         Ok((window, popover))
     }
@@ -156,6 +165,7 @@ impl Popover {
                 since: cx.background_executor().now(),
             },
             toward_icon: None,
+            surface: Surface::default(),
             _ticks: None,
             _closing: None,
             _subscriptions,
@@ -451,6 +461,11 @@ impl Popover {
             .outline()
             .large()
             .w_full()
+            // The outline fill is see-through in dark mode; over the blur it shows as it does on
+            // the solid card.
+            .when(self.surface == Surface::Blurred, |button| {
+                button.bg(theme.popover.blend(theme.input_background()))
+            })
             .disabled(!matches!(self.state.locations, Locations::Loaded(_)))
             .child(
                 h_flex()
@@ -528,41 +543,37 @@ impl Render for Popover {
         let main_mounted = self.page == Page::Main || progress < 1.;
         let locations_mounted = self.page == Page::Locations || progress > 0.;
 
-        div().size_full().p(SHADOW_MARGIN).child(
-            div()
-                .key_context(CONTEXT)
-                .track_focus(&self.focus_handle)
-                .on_action(cx.listener(|this, _: &Cancel, window, cx| this.dismiss(window, cx)))
-                .on_action(cx.listener(|this, _: &Escape, window, cx| this.dismiss(window, cx)))
-                .size_full()
-                .popover_style(cx)
-                .map(|mut card| {
-                    // GPUI fades each primitive on its own, so a full shadow would show through
-                    // the half-faded card; it follows the cube of the fade to stay hidden under it.
-                    for shadow in card.style().box_shadow.iter_mut().flatten() {
-                        shadow.color = shadow.color.opacity(entered.powi(3));
-                    }
-                    card
-                })
-                .relative()
-                .left(left)
-                .top(top)
-                .opacity(entered)
-                .rounded(cx.theme().radius_lg)
-                .overflow_hidden()
-                .child(
-                    h_flex()
-                        .items_start()
-                        .h_full()
-                        .w(CARD.width * 2.)
-                        .relative()
-                        .left(-CARD.width * progress)
-                        .child(page().when(main_mounted, |page| page.child(self.render_main(cx))))
-                        .child(page().when(locations_mounted, |page| {
-                            page.child(self.render_locations(cx))
-                        })),
-                ),
-        )
+        let fill = match self.surface {
+            Surface::Blurred => theme::translucent_popover(cx),
+            Surface::Solid => cx.theme().popover,
+        };
+
+        // The window, its OS shadow and backdrop show at once and stay put; only the content fades
+        // and slides in, which also keeps the backdrop from showing untinted.
+        div()
+            .key_context(CONTEXT)
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &Cancel, window, cx| this.dismiss(window, cx)))
+            .on_action(cx.listener(|this, _: &Escape, window, cx| this.dismiss(window, cx)))
+            .size_full()
+            .bg(fill)
+            .text_color(cx.theme().popover_foreground)
+            .rounded(cx.theme().radius_lg)
+            .overflow_hidden()
+            .child(
+                h_flex()
+                    .items_start()
+                    .h_full()
+                    .w(CARD.width * 2.)
+                    .relative()
+                    .left(left - CARD.width * progress)
+                    .top(top)
+                    .opacity(entered)
+                    .child(page().when(main_mounted, |page| page.child(self.render_main(cx))))
+                    .child(page().when(locations_mounted, |page| {
+                        page.child(self.render_locations(cx))
+                    })),
+            )
     }
 }
 

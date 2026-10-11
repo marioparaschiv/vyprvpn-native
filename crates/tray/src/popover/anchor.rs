@@ -4,8 +4,8 @@
 use gpui_kit::{App, Bounds, DisplayId, Pixels, Point, point, px};
 use placement::{LogicalSize, PhysicalRect};
 
+use super::CARD;
 use super::presence::{self, Side};
-use super::{CARD, Popover, SHADOW_MARGIN};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AnchorError {
@@ -50,7 +50,7 @@ impl Anchor {
     pub fn centred(cx: &App) -> Self {
         Self {
             display: None,
-            origin: Bounds::centered(None, Popover::window_size(), cx).origin,
+            origin: Bounds::centered(None, CARD, cx).origin,
             toward_icon: None,
         }
     }
@@ -65,8 +65,7 @@ pub fn icon_rect(rect: tray_icon::Rect) -> PhysicalRect {
     }
 }
 
-/// Places the card where [`placement::popover_origin`] puts it, with the window's shadow margin
-/// around it. GPUI positions a window in logical pixels of the display it opens on, which are that
+/// Places the card where [`placement::popover_origin`] puts it. GPUI positions a window in logical pixels of the display it opens on, which are that
 /// display's physical pixels divided by its scale.
 pub fn anchor(icon: PhysicalRect, monitor: &Monitor) -> Anchor {
     let card = LogicalSize {
@@ -85,8 +84,8 @@ pub fn anchor(icon: PhysicalRect, monitor: &Monitor) -> Anchor {
     Anchor {
         display: monitor.display,
         origin: point(
-            px(card_origin.x as f32 / monitor.scale) - SHADOW_MARGIN,
-            px(card_origin.y as f32 / monitor.scale) - SHADOW_MARGIN,
+            px(card_origin.x as f32 / monitor.scale),
+            px(card_origin.y as f32 / monitor.scale),
         ),
         toward_icon: presence::facing(card_rect, icon),
     }
@@ -234,9 +233,10 @@ mod tests {
 
     /// The card's top-left in physical pixels, as GPUI puts it on screen.
     fn card_on_screen(anchor: Anchor, scale: f32) -> (f32, f32) {
-        let card = anchor.origin + point(SHADOW_MARGIN, SHADOW_MARGIN);
-
-        (card.x.as_f32() * scale, card.y.as_f32() * scale)
+        (
+            anchor.origin.x.as_f32() * scale,
+            anchor.origin.y.as_f32() * scale,
+        )
     }
 
     #[test]
@@ -278,7 +278,7 @@ mod tests {
             Anchor {
                 display: Some(DisplayId::new(1)),
                 // The card at physical (1263, 378) is logical (842, 252).
-                origin: point(px(842.) - SHADOW_MARGIN, px(252.) - SHADOW_MARGIN),
+                origin: point(px(842.), px(252.)),
                 toward_icon: Some(Side::Bottom),
             }
         );
@@ -352,13 +352,7 @@ mod tests {
 
         // A 22-point icon at x = 1200 points, as tray-icon reports it at 2x.
         let anchor = anchor(rect(2400, 0, 44, 50), &monitor);
-        assert_eq!(
-            anchor.origin,
-            point(
-                px(1211.) - CARD.width / 2. - SHADOW_MARGIN,
-                px(25.) - SHADOW_MARGIN
-            )
-        );
+        assert_eq!(anchor.origin, point(px(1211.) - CARD.width / 2., px(25.)));
     }
 
     #[test]
@@ -379,10 +373,7 @@ mod tests {
         let anchor = anchor(rect(3000, -1080, 30, 25), &monitor);
         assert_eq!(
             anchor.origin,
-            point(
-                px(3015.) - CARD.width / 2. - SHADOW_MARGIN,
-                px(-1055.) - SHADOW_MARGIN
-            )
+            point(px(3015.) - CARD.width / 2., px(-1055.))
         );
     }
 

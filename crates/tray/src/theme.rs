@@ -13,7 +13,7 @@ use windows as os;
 
 #[cfg(windows)]
 use gpui_kit::AsyncApp;
-use gpui_kit::component::{Theme, ThemeMode};
+use gpui_kit::component::{ActiveTheme, Theme, ThemeMode};
 use gpui_kit::{App, Hsla, Subscription, Window};
 #[cfg(windows)]
 use tokio::sync::mpsc;
@@ -110,6 +110,15 @@ fn dev_override() -> Option<ThemeMode> {
             None
         }
     }
+}
+
+/// The card's fill over a blurred backdrop: the popover colour, thinned so the blur shows through
+/// while text on it stays readable. Dark text needs a lighter veil than light text.
+pub fn translucent_popover(cx: &App) -> Hsla {
+    let theme = cx.theme();
+    let opacity = if theme.is_dark() { 0.5 } else { 0.6 };
+
+    theme.popover.opacity(opacity)
 }
 
 fn shade(color: Hsla, lightness: f32) -> Hsla {
