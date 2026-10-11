@@ -150,15 +150,6 @@ impl MenuView {
                 None
             }
         };
-        let logged_in = matches!(state.account, Some(Account::LoggedIn { .. }));
-        let connected_to = match status {
-            Some(Status::Connected { spoke_id, .. }) => Some(spoke_id.as_str()),
-            _ => None,
-        };
-        let idle = matches!(
-            status,
-            Some(Status::Disconnected { .. } | Status::Connected { .. })
-        );
         let target = state.selected_spoke_id();
         let status_label = status_label(&state.helper, &state.locations);
 
@@ -171,15 +162,11 @@ impl MenuView {
                 Some(Status::Disconnected { .. }) | None => IconKind::Disconnected,
             },
             connect_label: match target {
-                Some(spoke_id) => {
-                    format!("Connect to {}", location_name(&state.locations, spoke_id))
-                }
+                Some(spoke_id) => format!("Connect to {}", state.locations.name(spoke_id)),
                 None => "Connect".to_owned(),
             },
-            connect_to: target
-                .filter(|&target| logged_in && idle && connected_to != Some(target))
-                .map(str::to_owned),
-            disconnect_enabled: logged_in && connected_to.is_some(),
+            connect_to: state.connect_target().map(str::to_owned),
+            disconnect_enabled: state.can_disconnect(),
             account_label: match &state.account {
                 Some(Account::LoggedIn { username }) => format!("Log out ({username})"),
                 Some(Account::LoggedOut) | None => "Log in…".to_owned(),
@@ -199,23 +186,12 @@ fn status_label(state: &HelperState, locations: &Locations) -> String {
         HelperState::Untrusted(untrusted) => format!("Helper not trusted: {untrusted}"),
         HelperState::Running(Status::Disconnected { .. }) => "Disconnected".to_owned(),
         HelperState::Running(Status::Connecting { spoke_id }) => {
-            format!("Connecting to {}…", location_name(locations, spoke_id))
+            format!("Connecting to {}…", locations.name(spoke_id))
         }
         HelperState::Running(Status::Connected { spoke_id, .. }) => {
-            format!("Connected: {}", location_name(locations, spoke_id))
+            format!("Connected: {}", locations.name(spoke_id))
         }
         HelperState::Running(Status::Disconnecting { .. }) => "Disconnecting…".to_owned(),
-    }
-}
-
-/// The location's name, or its spoke id while the locations are unknown.
-fn location_name<'a>(locations: &'a Locations, spoke_id: &'a str) -> &'a str {
-    match locations {
-        Locations::Loaded(locations) => locations
-            .iter()
-            .find(|location| location.spoke_id == spoke_id)
-            .map_or(spoke_id, |location| &location.name),
-        Locations::Loading | Locations::Failed(_) => spoke_id,
     }
 }
 

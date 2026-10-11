@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn verifies_this_process_as_its_own_user() {
         let helper = Helper::Console {
-            pipe_name: String::new(),
+            pipe_name: std::ffi::OsString::new(),
             user_sid: ipc::current_user_sid().unwrap(),
         };
 

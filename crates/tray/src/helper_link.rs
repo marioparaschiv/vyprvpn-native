@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
 use std::future;
 use std::io;
 use std::thread;
@@ -30,23 +31,26 @@ const NOT_SERVED: &[io::ErrorKind] = &[io::ErrorKind::NotFound, io::ErrorKind::C
 /// Where the helper listens, and whether the tray app starts it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Helper {
-    /// The installed service, started through the Service Control Manager whenever it is not running.
+    /// The installed helper, which the tray app starts whenever it is not running.
     Service,
     /// A helper started by hand with `vyprlite-helper --console`, running as `user_sid`.
     #[cfg(windows)]
-    Console { pipe_name: String, user_sid: String },
+    Console {
+        pipe_name: OsString,
+        user_sid: String,
+    },
     /// A helper started by hand with `vyprlite-helper --console`, running as this user.
     #[cfg(target_os = "macos")]
-    Console { pipe_name: String },
+    Console { pipe_name: OsString },
 }
 
 impl Helper {
-    fn pipe_name(&self) -> &str {
+    fn name(&self) -> &OsStr {
         match self {
             #[cfg(windows)]
-            Self::Service => ipc::SERVICE_PIPE_NAME,
+            Self::Service => OsStr::new(ipc::SERVICE_PIPE_NAME),
             #[cfg(target_os = "macos")]
-            Self::Service => ipc::DAEMON_SOCKET_PATH,
+            Self::Service => OsStr::new(ipc::DAEMON_SOCKET_PATH),
             Self::Console { pipe_name, .. } => pipe_name,
         }
     }
@@ -55,7 +59,7 @@ impl Helper {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelperState {
     NotRunning,
-    /// The helper is not running and the Service Control Manager refused to start it, for this reason.
+    /// The helper is not running and starting it failed, for this reason.
     StartFailed(String),
     /// Something other than the helper serves its pipe; nothing is sent to it.
     Untrusted(Untrusted),
@@ -68,6 +72,28 @@ pub enum Locations {
     /// Fetching failed for this reason; the link retries.
     Failed(String),
     Loaded(Vec<Location>),
+}
+
+impl Locations {
+    /// The locations once loaded, else none.
+    pub fn loaded(&self) -> &[Location] {
+        match self {
+            Self::Loaded(locations) => locations,
+            Self::Loading | Self::Failed(_) => &[],
+        }
+    }
+
+    pub fn find(&self, spoke_id: &str) -> Option<&Location> {
+        self.loaded()
+            .iter()
+            .find(|location| location.spoke_id == spoke_id)
+    }
+
+    /// The location's name, or its spoke id while the location is unknown.
+    pub fn name<'a>(&'a self, spoke_id: &'a str) -> &'a str {
+        self.find(spoke_id)
+            .map_or(spoke_id, |location| &location.name)
+    }
 }
 
 /// Everything the tray app shows about the helper.
@@ -99,12 +125,40 @@ impl LinkState {
                 None
             }
         };
-        let first = match &self.locations {
-            Locations::Loaded(locations) => locations.first().map(|first| first.spoke_id.as_str()),
-            Locations::Loading | Locations::Failed(_) => None,
-        };
+        let first = self
+            .locations
+            .loaded()
+            .first()
+            .map(|first| first.spoke_id.as_str());
 
         self.selected.as_deref().or(current).or(first)
+    }
+
+    /// Where Connect goes, or `None` while connecting there makes no sense: nobody is logged in,
+    /// the helper is busy or unreachable, or it is already connected there.
+    pub fn connect_target(&self) -> Option<&str> {
+        let idle = matches!(
+            self.helper,
+            HelperState::Running(Status::Disconnected { .. } | Status::Connected { .. })
+        );
+        let target = self.selected_spoke_id()?;
+
+        (self.logged_in() && idle && self.connected_to() != Some(target)).then_some(target)
+    }
+
+    pub fn can_disconnect(&self) -> bool {
+        self.logged_in() && self.connected_to().is_some()
+    }
+
+    fn logged_in(&self) -> bool {
+        matches!(self.account, Some(Account::LoggedIn { .. }))
+    }
+
+    fn connected_to(&self) -> Option<&str> {
+        match &self.helper {
+            HelperState::Running(Status::Connected { spoke_id, .. }) => Some(spoke_id.as_str()),
+            _ => None,
+        }
     }
 }
 
@@ -148,18 +202,17 @@ impl Command {
 }
 
 impl Requests {
+    /// Requests whose commands go to the returned receiver and whose selection goes to `state`.
+    fn new(state: watch::Sender<LinkState>) -> (Self, mpsc::UnboundedReceiver<Command>) {
+        let (commands, received) = mpsc::unbounded_channel();
+
+        (Self { commands, state }, received)
+    }
+
     /// Requests that go to the returned receiver rather than to a helper.
     #[cfg(test)]
     pub fn intercepted() -> (Self, mpsc::UnboundedReceiver<Command>) {
-        let (requests, commands) = mpsc::unbounded_channel();
-
-        (
-            Self {
-                commands: requests,
-                state: watch::Sender::new(LinkState::default()),
-            },
-            commands,
-        )
+        Self::new(watch::Sender::new(LinkState::default()))
     }
 
     #[cfg(test)]
@@ -212,11 +265,7 @@ pub fn spawn(helper: Helper) -> io::Result<(watch::Receiver<LinkState>, Requests
         .enable_all()
         .build()?;
     let (state, observed) = watch::channel(LinkState::default());
-    let (requests, mut commands) = mpsc::unbounded_channel();
-    let requests = Requests {
-        commands: requests,
-        state: state.clone(),
-    };
+    let (requests, mut commands) = Requests::new(state.clone());
 
     thread::Builder::new()
         .name("helper-link".into())
@@ -234,7 +283,7 @@ async fn run(
     let mut retry_delay = MIN_RETRY_DELAY;
 
     loop {
-        let unreachable = match connect(helper.pipe_name()).await {
+        let unreachable = match connect(helper.name()).await {
             Ok(stream) => match verify(helper, &stream) {
                 Ok(()) => {
                     retry_delay = MIN_RETRY_DELAY;
@@ -291,8 +340,8 @@ fn verify(helper: &Helper, stream: &Stream) -> Result<(), Untrusted> {
     trust::verify_peer(helper, &peer)
 }
 
-async fn connect(pipe_name: &str) -> io::Result<Stream> {
-    Stream::connect(pipe_name.to_fs_name::<GenericFilePath>()?).await
+async fn connect(name: &OsStr) -> io::Result<Stream> {
+    Stream::connect(name.to_fs_name::<GenericFilePath>()?).await
 }
 
 /// What to do with the answer to a request.
@@ -537,7 +586,7 @@ mod tests {
         #[cfg(windows)]
         fn start_expecting(pipe_name: &str, user_sid: &str) -> Self {
             Self::follow(Helper::Console {
-                pipe_name: pipe_name.to_owned(),
+                pipe_name: pipe_name.into(),
                 user_sid: user_sid.to_owned(),
             })
         }
@@ -545,17 +594,13 @@ mod tests {
         #[cfg(target_os = "macos")]
         fn start(pipe_name: &str) -> Self {
             Self::follow(Helper::Console {
-                pipe_name: pipe_name.to_owned(),
+                pipe_name: pipe_name.into(),
             })
         }
 
         fn follow(helper: Helper) -> Self {
             let (state, observed) = watch::channel(LinkState::default());
-            let (requests, mut commands) = mpsc::unbounded_channel();
-            let requests = Requests {
-                commands: requests,
-                state: state.clone(),
-            };
+            let (requests, mut commands) = Requests::new(state.clone());
             let task = tokio::spawn(async move { run(&helper, &state, &mut commands).await });
 
             Self {
@@ -791,10 +836,7 @@ mod tests {
         });
         assert_eq!(state.selected_spoke_id(), Some("us5"));
 
-        let (requests, _commands) = Requests::intercepted();
-        let mut observed = requests.state.subscribe();
-        requests.select("au2".into());
-        state.selected = observed.borrow_and_update().selected.clone();
+        state.selected = Some("au2".into());
         assert_eq!(state.selected_spoke_id(), Some("au2"));
 
         assert_eq!(LinkState::default().selected_spoke_id(), None);

@@ -8,25 +8,20 @@ mod helper_link;
 mod icons;
 mod login_window;
 mod popover;
-#[cfg_attr(target_os = "macos", path = "macos/service.rs")]
 mod service;
 mod theme;
 mod tray_menu;
 mod trust;
 
-use std::collections::BTreeSet;
-#[cfg(target_os = "macos")]
-use std::ffi::OsString;
 #[cfg(windows)]
 use std::io;
 use std::process::ExitCode;
 use std::time::Instant;
 
 use gpui_kit::{
-    AnyWindowHandle, App, AsyncApp, Bounds, Entity, GraphicalEnvironment, QuitMode,
-    WindowingRequest,
+    AnyWindowHandle, App, AsyncApp, Entity, GraphicalEnvironment, QuitMode, WindowingRequest,
 };
-use ipc::{Account, Location, Method};
+use ipc::{Account, Method};
 use placement::PhysicalRect;
 use tokio::sync::{mpsc, watch};
 use tray_icon::menu::{MenuEvent, MenuId};
@@ -34,8 +29,9 @@ use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 
 use helper_link::{Helper, LinkState, Locations, RequestError, Requests};
 use login_window::LoginWindow;
+use popover::anchor::{self, Anchor};
 use popover::toggle::{self, Toggle};
-use popover::{Popover, PopoverEvent, anchor};
+use popover::{Popover, PopoverEvent};
 use tray_menu::{MenuAction, TrayError, TrayMenu};
 
 #[derive(Debug, thiserror::Error)]
@@ -45,9 +41,6 @@ enum ArgsError {
     #[cfg(windows)]
     #[error("finding the console pipe failed: {0}")]
     ConsolePipe(#[from] io::Error),
-    #[cfg(target_os = "macos")]
-    #[error("the console socket path {0:?} is not valid UTF-8")]
-    ConsoleSocketPath(OsString),
 }
 
 enum UiEvent {
@@ -135,16 +128,13 @@ fn helper(mut args: impl Iterator<Item = String>) -> Result<Helper, ArgsError> {
         (Some("--console"), None) => {
             let user_sid = ipc::current_user_sid()?;
             Ok(Helper::Console {
-                pipe_name: ipc::console_pipe_name(&user_sid),
+                pipe_name: ipc::console_pipe_name(&user_sid).into(),
                 user_sid,
             })
         }
         #[cfg(target_os = "macos")]
         (Some("--console"), None) => Ok(Helper::Console {
-            pipe_name: ipc::console_socket_path()
-                .into_os_string()
-                .into_string()
-                .map_err(ArgsError::ConsoleSocketPath)?,
+            pipe_name: ipc::console_socket_path().into_os_string(),
         }),
         _ => Err(ArgsError::Usage),
     }
@@ -196,6 +186,7 @@ fn start(
         let mut asked_to_log_in = false;
         let mut flags_cached = false;
         let mut popover = PopoverSlot::default();
+        let mut login = None;
 
         loop {
             tokio::select! {
@@ -216,23 +207,21 @@ fn start(
 
                     if !flags_cached && let Locations::Loaded(locations) = &state.locations {
                         flags_cached = true;
-                        if let Err(error) = flags::cache(country_codes(locations)) {
+                        if let Err(error) = flags::cache(locations) {
                             log::warn!("cannot cache flags: {error}");
                         }
                     }
 
                     if !asked_to_log_in && state.account == Some(Account::LoggedOut) {
                         asked_to_log_in = true;
-                        show_login(cx, &requests, popover.window()).await;
+                        show_login(cx, &requests, &mut login).await;
                     }
                 }
                 Some(event) = received.recv() => match event {
                     UiEvent::MenuClicked(id) => match tray.action(&id) {
                         Some(MenuAction::Connect(spoke_id)) => connect(cx, &requests, spoke_id),
                         Some(MenuAction::Disconnect) => disconnect(cx, &requests),
-                        Some(MenuAction::LogIn) => {
-                            show_login(cx, &requests, popover.window()).await;
-                        }
+                        Some(MenuAction::LogIn) => show_login(cx, &requests, &mut login).await,
                         Some(MenuAction::LogOut) => log_out(cx, &requests),
                         Some(MenuAction::Exit) => break,
                         None => {}
@@ -274,22 +263,9 @@ fn start(
     Ok(())
 }
 
-fn country_codes(locations: &[Location]) -> Vec<String> {
-    let codes: BTreeSet<&str> = locations
-        .iter()
-        .map(|location| location.country_code.as_str())
-        .collect();
-
-    codes.into_iter().map(str::to_owned).collect()
-}
-
 /// Brings the login window forward, opening it if needed.
-async fn show_login(cx: &mut AsyncApp, requests: &Requests, popover: Option<AnyWindowHandle>) {
-    let open: Option<AnyWindowHandle> = cx.update(|cx| {
-        cx.windows()
-            .into_iter()
-            .find(|window| Some(*window) != popover)
-    });
+async fn show_login(cx: &mut AsyncApp, requests: &Requests, login: &mut Option<AnyWindowHandle>) {
+    let open = login.filter(|window| cx.update(|cx| cx.windows().contains(window)));
     if let Some(window) = open {
         if let Err(error) = window.update(cx, |_, window, _| window.activate_window()) {
             log::warn!("bringing the login window forward failed: {error}");
@@ -300,9 +276,12 @@ async fn show_login(cx: &mut AsyncApp, requests: &Requests, popover: Option<AnyW
     if !go_windowed(cx).await {
         return;
     }
-    if let Err(error) = cx.update(|cx| LoginWindow::open(cx, requests.clone())) {
-        log::error!("opening the login window failed: {error:#}");
-        go_headless_once_windowless(cx).await;
+    match cx.update(|cx| LoginWindow::open(cx, requests.clone())) {
+        Ok(window) => *login = Some(window),
+        Err(error) => {
+            log::error!("opening the login window failed: {error:#}");
+            go_headless_once_windowless(cx).await;
+        }
     }
 }
 
@@ -320,18 +299,14 @@ async fn open_popover(
 
     let events = events.clone();
     let opened = cx.update(|cx| -> gpui_kit::Result<_> {
-        let (display, origin) = match anchor::monitor(icon, cx) {
-            Ok(monitor) => {
-                let anchor = anchor::anchor(icon, &monitor);
-                (anchor.display, anchor.origin)
-            }
+        let anchor = match anchor::monitor(icon, cx) {
+            Ok(monitor) => anchor::anchor(icon, &monitor),
             Err(error) => {
                 log::warn!("{error}; centring the popover");
-                let centred = Bounds::centered(None, Popover::window_size(), cx);
-                (None, centred.origin)
+                Anchor::centred(cx)
             }
         };
-        let (window, popover) = Popover::open(cx, display, origin, state)?;
+        let (window, popover) = Popover::open(cx, anchor, state)?;
         cx.subscribe(&popover, move |_, event: &PopoverEvent, _| {
             // Fails only once the UI loop has ended and the app is quitting.
             events.send(UiEvent::Popover(event.clone())).ok();
@@ -357,8 +332,8 @@ fn show_in_popover(
     popover: &Entity<Popover>,
     state: LinkState,
 ) {
-    let shown = window.update(cx, |_, window, cx| {
-        popover.update(cx, |popover, cx| popover.set_state(state, window, cx));
+    let shown = window.update(cx, |_, _, cx| {
+        popover.update(cx, |popover, cx| popover.set_state(state, cx));
     });
     // Fails only when the popover has just closed itself; its WindowClosed event follows.
     if let Err(error) = shown {
@@ -381,22 +356,13 @@ async fn go_windowed(cx: &mut AsyncApp) -> bool {
         log::error!("cannot show windows: {error:#}");
         return false;
     }
-    // Going windowed does not activate a macOS app, so the window would open behind the others.
-    #[cfg(target_os = "macos")]
-    cx.update(|cx| cx.activate(true));
 
     true
 }
 
 fn log_out(cx: &mut AsyncApp, requests: &Requests) {
     let requests = requests.clone();
-
-    cx.spawn(async move |_| {
-        if let Err(error) = requests.send(Method::Logout).await {
-            log::error!("logging out failed: {error}");
-        }
-    })
-    .detach();
+    carry_out(cx, async move { requests.send(Method::Logout).await });
 }
 
 fn connect(cx: &mut AsyncApp, requests: &Requests, spoke_id: String) {
@@ -409,7 +375,7 @@ fn disconnect(cx: &mut AsyncApp, requests: &Requests) {
     carry_out(cx, async move { requests.disconnect().await });
 }
 
-/// Runs a connect or disconnect request, showing why if it fails; its progress shows in the status.
+/// Runs a request, notifying why if it fails; its effect shows in the state the helper reports.
 fn carry_out(cx: &mut AsyncApp, request: impl Future<Output = Result<(), RequestError>> + 'static) {
     cx.spawn(async move |_| {
         if let Err(error) = request.await {

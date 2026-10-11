@@ -14,7 +14,7 @@ use windows as os;
 #[cfg(windows)]
 use gpui_kit::AsyncApp;
 use gpui_kit::component::{Theme, ThemeMode};
-use gpui_kit::{App, Hsla, Subscription, Window, WindowAppearance};
+use gpui_kit::{App, Hsla, Subscription, Window};
 #[cfg(windows)]
 use tokio::sync::mpsc;
 
@@ -95,10 +95,7 @@ fn mode(cx: &App) -> ThemeMode {
         return mode;
     }
 
-    match cx.window_appearance() {
-        WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
-        WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
-    }
+    cx.window_appearance().into()
 }
 
 /// `VYPRLITE_THEME=light` or `dark` pins the mode in debug builds, for screenshots without touching
