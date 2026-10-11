@@ -8,7 +8,7 @@ use std::process::{Command, ExitCode, ExitStatus};
 const BINARIES: [&str; 2] = ["VyprLite.exe", "vyprlite-helper.exe"];
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+enum Error {
     #[error("usage: cargo xtask dist")]
     Usage,
     #[error("{action} {}: {source}", path.display())]
@@ -124,7 +124,7 @@ fn copy(from: &Path, to: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn io_error(action: &'static str, path: &Path) -> impl FnOnce(std::io::Error) -> Error {
+fn io_error(action: &'static str, path: &Path) -> impl FnOnce(std::io::Error) -> Error {
     let path = path.to_path_buf();
     move |source| Error::Io {
         action,

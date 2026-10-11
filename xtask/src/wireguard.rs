@@ -23,19 +23,7 @@ const SIGNATURE_SCRIPT: &str = "$s = Get-AuthenticodeSignature -LiteralPath $env
 /// and Authenticode signature.
 pub fn fetch_verified_dll(cache_dir: &Path) -> Result<PathBuf, Error> {
     let zip_path = cache_dir.join(ZIP_NAME);
-    let cached = zip_path.exists();
-    let archive = if cached {
-        fs::read(&zip_path).map_err(io_error("reading", &zip_path))?
-    } else {
-        download(ZIP_URL)?
-    };
-
-    verify_sha256(&archive, ZIP_SHA256, &zip_path)?;
-
-    if !cached {
-        fs::create_dir_all(cache_dir).map_err(io_error("creating", cache_dir))?;
-        fs::write(&zip_path, &archive).map_err(io_error("writing", &zip_path))?;
-    }
+    let archive = verified_zip(cache_dir, &zip_path)?;
 
     let dll = extract_entry(&archive, DLL_ENTRY, &zip_path)?;
     let dll_path = cache_dir.join(DLL_NAME);
@@ -45,6 +33,25 @@ pub fn fetch_verified_dll(cache_dir: &Path) -> Result<PathBuf, Error> {
     check_signature(&dll_path, &status, &subject)?;
 
     Ok(dll_path)
+}
+
+/// The cached zip when its hash matches, otherwise a fresh download that replaces it.
+fn verified_zip(cache_dir: &Path, zip_path: &Path) -> Result<Vec<u8>, Error> {
+    if zip_path.exists() {
+        let cached = fs::read(zip_path).map_err(io_error("reading", zip_path))?;
+        match verify_sha256(&cached, ZIP_SHA256, zip_path) {
+            Ok(()) => return Ok(cached),
+            Err(error) => eprintln!("{error}; downloading it again"),
+        }
+    }
+
+    let archive = download(ZIP_URL)?;
+    verify_sha256(&archive, ZIP_SHA256, zip_path)?;
+
+    fs::create_dir_all(cache_dir).map_err(io_error("creating", cache_dir))?;
+    fs::write(zip_path, &archive).map_err(io_error("writing", zip_path))?;
+
+    Ok(archive)
 }
 
 fn download(url: &str) -> Result<Vec<u8>, Error> {
