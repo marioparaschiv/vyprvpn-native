@@ -4,13 +4,12 @@ mod install;
 mod teardown_store;
 
 use std::env;
-use std::fs::{self, DirBuilder, OpenOptions, Permissions};
+use std::fs::{self, DirBuilder, Permissions};
 use std::future::Future;
 use std::io;
 use std::num::ParseIntError;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use std::sync::Arc;
 
 use interprocess::local_socket::tokio::{Listener, Stream};
@@ -19,10 +18,9 @@ use interprocess::local_socket::{GenericFilePath, ListenerOptions, ToFsName};
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::state::State;
-use crate::{crash_log, server};
+use crate::{init_logging, server};
 use boringtun::Boringtun;
-pub use credential_store::{CredentialStore, CredentialStoreError};
-pub use teardown_store::{TeardownStore, TeardownStoreError};
+pub use credential_store::{CREDENTIALS_FILE, SealError, seal, unseal, write_private};
 
 const DAEMON_DATA_DIR: &str = "/Library/Application Support/VyprLite";
 
@@ -42,7 +40,7 @@ enum Mode {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum HelperError {
+pub enum HelperError {
     #[error("usage: vyprlite-helper install | uninstall | --console | --daemon --owner-uid <UID>")]
     Usage,
     #[error("the owner uid is not a number: {0}")]
@@ -65,31 +63,17 @@ enum HelperError {
     Install(#[from] install::InstallError),
 }
 
-pub fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("{error}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn run() -> Result<(), HelperError> {
+pub fn run() -> Result<(), HelperError> {
     let mode = match parse_command(env::args().skip(1))? {
         Command::Run(mode) => mode,
         Command::Install => return Ok(install::install()?),
         Command::Uninstall => return Ok(install::uninstall()?),
     };
     let data_dir = data_dir(&mode)?;
-    crash_log::record_panics_in(data_dir.join("crash.log"));
-
-    let mut logger =
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    init_logging(&data_dir, matches!(mode, Mode::Daemon { .. })).map_err(HelperError::LogFile)?;
 
     match mode {
         Mode::Console => {
-            logger.init();
             let socket = ipc::console_socket_path();
             log::info!("serving {}; press Ctrl+C to stop", socket.display());
 
@@ -97,29 +81,18 @@ fn run() -> Result<(), HelperError> {
                 tokio::signal::ctrl_c().await.map_err(HelperError::Signal)
             })
         }
-        Mode::Daemon { owner } => {
-            let log_file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(data_dir.join("helper.log"))
-                .map_err(HelperError::LogFile)?;
-            logger
-                .target(env_logger::Target::Pipe(Box::new(log_file)))
-                .init();
-
-            serve(
-                Path::new(ipc::DAEMON_SOCKET_PATH),
-                owner,
-                &data_dir,
-                async {
-                    signal(SignalKind::terminate())
-                        .map_err(HelperError::Signal)?
-                        .recv()
-                        .await;
-                    Ok(())
-                },
-            )
-        }
+        Mode::Daemon { owner } => serve(
+            Path::new(ipc::DAEMON_SOCKET_PATH),
+            owner,
+            &data_dir,
+            async {
+                signal(SignalKind::terminate())
+                    .map_err(HelperError::Signal)?
+                    .recv()
+                    .await;
+                Ok(())
+            },
+        ),
     }
 }
 
@@ -161,7 +134,7 @@ fn data_dir(mode: &Mode) -> Result<PathBuf, HelperError> {
 }
 
 /// Serves the helper on `socket`, reachable only by root and `owner`, until `shutdown` completes
-/// or no tray app has been connected for a while.
+/// or neither a tray app nor a tunnel has been up for a while.
 fn serve(
     socket: &Path,
     owner: u32,
@@ -227,31 +200,10 @@ fn admits(uid: u32, owner: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use interprocess::local_socket::traits::tokio::Stream as _;
-    use ipc::{Method, Outcome, Reply, Request, Response, ServerMessage, Status};
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use ipc::{Outcome, Reply, Response, ServerMessage, Status};
 
     use super::*;
-    use crate::vpn::fakes::FakeTunnel;
-
-    type TestState = Arc<State<Arc<FakeTunnel>>>;
-
-    fn args(line: &str) -> impl Iterator<Item = String> {
-        line.split_whitespace().map(str::to_owned)
-    }
-
-    /// Keep the directory alive as long as the state.
-    fn test_state() -> (TestState, tempfile::TempDir) {
-        let data_dir = tempfile::tempdir().unwrap();
-        let state = State::new(
-            vypr_api::DEFAULT_BASE_URL,
-            data_dir.path(),
-            Arc::new(FakeTunnel::default()),
-        )
-        .unwrap();
-
-        (Arc::new(state), data_dir)
-    }
+    use crate::test_support::{args, request_status, test_state};
 
     #[test]
     fn parses_commands() {
@@ -298,28 +250,13 @@ mod tests {
         assert!(!admits(502, 501));
     }
 
-    /// Connects like the tray app does and asks for the status, keeping the connection open.
-    async fn request_status(socket: &Path) -> io::Result<(ServerMessage, Stream)> {
-        let mut stream = Stream::connect(socket.to_fs_name::<GenericFilePath>()?).await?;
-        let request = Request {
-            id: 3,
-            method: Method::Status,
-        };
-        stream.write_all(&ipc::encode(&request)?).await?;
-
-        let mut line = String::new();
-        BufReader::new(&mut stream).read_line(&mut line).await?;
-
-        Ok((ipc::decode(&line)?, stream))
-    }
-
     #[tokio::test]
     async fn owner_gets_status_over_the_socket() {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("helper.sock");
         let owner = ipc::current_user_uid();
         let listener = listen(&socket, owner).unwrap();
-        let (state, _data_dir) = test_state();
+        let (state, _data_dir) = test_state(vypr_api::DEFAULT_BASE_URL);
 
         let reply = tokio::select! {
             served = server::serve(listener, state, server::IDLE_EXIT_AFTER, |stream| admit(stream, owner)) => panic!("helper stopped: {served:?}"),

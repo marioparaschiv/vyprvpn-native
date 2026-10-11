@@ -28,7 +28,6 @@ where
     let (reader, mut writer) = tokio::io::split(stream);
     let mut lines = BufReader::new(reader).lines();
     let mut status = state.status();
-    status.mark_unchanged();
     let mut account = state.account().subscribe();
     let mut answers = JoinSet::new();
 
@@ -103,17 +102,14 @@ async fn answer<T: Tunnel>(request: Request, state: Arc<State<T>>) -> Response {
 mod tests {
     use ipc::{Account, Status};
     use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::path;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
-    use crate::vpn::fakes::FakeTunnel;
+    use crate::test_support::{LOGIN, SETTINGS, serve_one_session};
+    use crate::vpn::fakes::{FakeTunnel, TUNNEL_IP};
 
     const LOCATIONS: &str = include_str!("../../vypr-api/tests/fixtures/locations.json");
-    const SETTINGS: &str = include_str!("../../vypr-api/tests/fixtures/settings.json");
-    const CONNECT: &str = include_str!("../../vypr-api/tests/fixtures/connect.json");
-    const LOGIN: &str =
-        r#"{"id":7,"method":"login","username":"alice","password":"correct horse"}"#;
     const CONNECT_DE1: &str = r#"{"id":8,"method":"connect","spoke_id":"de1"}"#;
 
     /// A helper with its own data directory, talking to a fake VyprVPN and a fake tunnel.
@@ -143,26 +139,6 @@ mod tests {
             self.state = Arc::new(
                 State::new(&self.vypr.uri(), self.data_dir.path(), self.tunnel.clone()).unwrap(),
             );
-        }
-
-        /// A VyprVPN that accepts the login and opens and deletes one session on de1.
-        async fn serve_one_session(&self) {
-            Mock::given(path("/settings"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(SETTINGS))
-                .mount(&self.vypr)
-                .await;
-            Mock::given(method("POST"))
-                .and(path("/vyprvpn/spokes/de1/wg/connections"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(CONNECT))
-                .expect(1)
-                .mount(&self.vypr)
-                .await;
-            Mock::given(method("DELETE"))
-                .and(path("/vyprvpn/spokes/de1/wg/connections/48213977"))
-                .respond_with(ResponseTemplate::new(200))
-                .expect(1)
-                .mount(&self.vypr)
-                .await;
         }
 
         async fn wait_for(&self, settled: impl FnMut(&Status) -> bool) {
@@ -206,7 +182,8 @@ mod tests {
 
         async fn receive_status(&mut self) -> Status {
             loop {
-                if let Some(ServerMessage::Status(status)) = self.receive().await {
+                if let ServerMessage::Status(status) = self.receive().await.expect("helper hung up")
+                {
                     return status;
                 }
             }
@@ -216,7 +193,9 @@ mod tests {
             self.send(line).await;
 
             loop {
-                if let Some(ServerMessage::Response(response)) = self.receive().await {
+                if let ServerMessage::Response(response) =
+                    self.receive().await.expect("helper hung up")
+                {
                     return response.outcome;
                 }
             }
@@ -251,7 +230,7 @@ mod tests {
     #[tokio::test]
     async fn connects_and_pushes_the_status_to_every_tray_app() {
         let helper = Helper::start().await;
-        helper.serve_one_session().await;
+        serve_one_session(&helper.vypr).await;
         let mut tray = helper.connect();
         let mut other = helper.connect();
         tray.request(LOGIN).await;
@@ -273,7 +252,7 @@ mod tests {
                     ..
                 } => {
                     assert_eq!(spoke_id, "de1");
-                    assert_eq!(tunnel_ip, std::net::Ipv4Addr::new(10, 21, 0, 7));
+                    assert_eq!(tunnel_ip, TUNNEL_IP);
                     break;
                 }
                 status => panic!("{status:?}"),
@@ -301,7 +280,7 @@ mod tests {
     #[tokio::test]
     async fn logging_out_disconnects() {
         let helper = Helper::start().await;
-        helper.serve_one_session().await;
+        serve_one_session(&helper.vypr).await;
         let mut tray = helper.connect();
         tray.request(LOGIN).await;
         tray.request(CONNECT_DE1).await;

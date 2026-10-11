@@ -12,7 +12,7 @@ use crate::connection;
 use crate::state::State;
 use crate::vpn::Tunnel;
 
-/// How long the helper waits without any tray app connected before it exits.
+/// How long the helper waits with no tray app connected and no tunnel up before it exits.
 pub const IDLE_EXIT_AFTER: Duration = Duration::from_secs(5);
 
 /// Serves every tray app that connects; returns once neither a tray app nor a tunnel has been up

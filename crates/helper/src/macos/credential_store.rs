@@ -1,116 +1,55 @@
-use std::fs::{self, OpenOptions};
+use std::convert::Infallible;
+use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use ipc::Credentials;
+pub const CREDENTIALS_FILE: &str = "credentials.json";
 
-#[derive(Debug, thiserror::Error)]
-pub enum CredentialStoreError {
-    #[error("accessing {path} failed: {source}")]
-    Io { path: PathBuf, source: io::Error },
-    #[error("the stored login is malformed: {0}")]
-    Malformed(#[from] serde_json::Error),
+pub type SealError = Infallible;
+
+/// Stored as is: the file is root-only, and the daemon's data directory is root-owned with mode
+/// 0700, so nobody else can reach it either way.
+pub fn seal(data: Vec<u8>) -> Result<Vec<u8>, SealError> {
+    Ok(data)
 }
 
-/// The login as a root-only file. The daemon's data directory is root-owned with mode 0700, so
-/// nobody else can reach the file either way.
-#[derive(Debug, Clone)]
-pub struct CredentialStore {
-    path: PathBuf,
+pub fn unseal(sealed: Vec<u8>) -> Result<Vec<u8>, SealError> {
+    Ok(sealed)
 }
 
-impl CredentialStore {
-    pub fn new(data_dir: &Path) -> Self {
-        Self {
-            path: data_dir.join("credentials.json"),
-        }
-    }
-
-    pub fn load(&self) -> Result<Option<Credentials>, CredentialStoreError> {
-        let json = match fs::read(&self.path) {
-            Ok(json) => json,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(source) => return Err(self.io_error(source)),
-        };
-
-        Ok(Some(serde_json::from_slice(&json)?))
-    }
-
-    pub fn save(&self, credentials: &Credentials) -> Result<(), CredentialStoreError> {
-        let json = serde_json::to_vec(credentials)?;
-
-        OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&self.path)
-            .and_then(|mut file| file.write_all(&json))
-            .map_err(|source| self.io_error(source))
-    }
-
-    /// Succeeds when there is nothing to delete.
-    pub fn delete(&self) -> Result<(), CredentialStoreError> {
-        match fs::remove_file(&self.path) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(self.io_error(error)),
-            _ => Ok(()),
-        }
-    }
-
-    fn io_error(&self, source: io::Error) -> CredentialStoreError {
-        CredentialStoreError::Io {
-            path: self.path.clone(),
-            source,
-        }
-    }
+/// Readable and writable only by the helper's account.
+pub fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .and_then(|mut file| file.write_all(contents))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
-
-    fn alice() -> Credentials {
-        Credentials {
-            username: "alice".into(),
-            password: "correct horse".into(),
-        }
-    }
-
-    #[test]
-    fn round_trips_a_login() {
-        let data_dir = tempfile::tempdir().unwrap();
-        let store = CredentialStore::new(data_dir.path());
-
-        assert_eq!(store.load().unwrap(), None);
-        store.save(&alice()).unwrap();
-
-        assert_eq!(store.load().unwrap(), Some(alice()));
-    }
+    use crate::credential_store::CredentialStore;
+    use crate::vpn::fakes::alice;
 
     #[test]
     fn only_the_owner_can_read_the_file() {
         let data_dir = tempfile::tempdir().unwrap();
-        let store = CredentialStore::new(data_dir.path());
 
-        store.save(&alice()).unwrap();
+        CredentialStore::new(data_dir.path())
+            .save(&alice())
+            .unwrap();
 
-        let mode = fs::metadata(&store.path).unwrap().permissions().mode();
+        let mode = fs::metadata(data_dir.path().join(CREDENTIALS_FILE))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
-    }
-
-    #[test]
-    fn delete_removes_the_login_and_tolerates_none() {
-        let data_dir = tempfile::tempdir().unwrap();
-        let store = CredentialStore::new(data_dir.path());
-        store.save(&alice()).unwrap();
-
-        store.delete().unwrap();
-        store.delete().unwrap();
-
-        assert_eq!(store.load().unwrap(), None);
-        assert!(!store.path.exists());
     }
 }

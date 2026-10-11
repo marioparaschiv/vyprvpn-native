@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tunnel::{ActiveTunnel, AdapterPlan, TunnelError};
 
-use super::{TeardownStore, TeardownStoreError};
+use super::teardown_store::{TeardownStore, TeardownStoreError};
 use crate::vpn::Tunnel;
 
 #[derive(Debug, thiserror::Error)]

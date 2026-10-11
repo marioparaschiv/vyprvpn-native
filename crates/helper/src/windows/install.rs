@@ -7,7 +7,6 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use interprocess::local_socket::{GenericFilePath, ToFsName};
 use windows_service::service::{
     Service, ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType, ServiceState,
     ServiceType,
@@ -19,8 +18,8 @@ use windows_sys::Win32::Foundation::{
 use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE};
 
-use super::security::{InvalidSid, Sid};
-use crate::disconnect::{DisconnectError, disconnect};
+use super::security::{CurrentSidError, Sid};
+use crate::disconnect::{DisconnectError, disconnect_blocking};
 
 const SERVICE_DISPLAY_NAME: &str = "VyprLite Helper";
 const TRAY_EXE: &str = "VyprLite.exe";
@@ -35,10 +34,8 @@ const STOP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub enum InstallError {
     #[error("access denied: run this from an administrator command prompt")]
     NotElevated,
-    #[error("finding the current user failed: {0}")]
-    CurrentUser(io::Error),
     #[error(transparent)]
-    InvalidSid(#[from] InvalidSid),
+    CurrentUser(#[from] CurrentSidError),
     #[error("finding the helper's own directory failed: {0}")]
     ExeDir(io::Error),
     #[error("environment variable SystemRoot is not set")]
@@ -187,12 +184,8 @@ fn service_sddl(owner: &Sid) -> String {
 
 pub fn install() -> Result<(), InstallError> {
     let manager = elevated_service_manager()?;
-    let owner = Sid::parse(&ipc::current_user_sid().map_err(InstallError::CurrentUser)?)?;
-    let exe_dir = env::current_exe()
-        .map_err(InstallError::ExeDir)?
-        .parent()
-        .ok_or_else(|| InstallError::ExeDir(io::Error::other("the executable has no parent")))?
-        .to_owned();
+    let owner = Sid::current()?;
+    let exe_dir = crate::exe_dir().map_err(InstallError::ExeDir)?;
 
     let plan = install_plan(&exe_dir, &owner, find_service(&manager)?);
     execute(&manager, &plan)?;
@@ -319,15 +312,7 @@ fn execute(manager: &ServiceManager, plan: &[Step]) -> Result<(), InstallError> 
                     action: "writing",
                     source,
                 })?,
-            Step::Disconnect => tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(DisconnectError::Io)?
-                .block_on(disconnect(
-                    ipc::SERVICE_PIPE_NAME
-                        .to_fs_name::<GenericFilePath>()
-                        .map_err(DisconnectError::Io)?,
-                ))?,
+            Step::Disconnect => disconnect_blocking(ipc::SERVICE_PIPE_NAME)?,
             Step::RemoveService => remove_service(manager)?,
             Step::DeleteAutostart => delete_autostart()?,
             Step::DeleteAppId { key } => {

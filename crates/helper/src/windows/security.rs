@@ -12,7 +12,20 @@ pub struct Sid(String);
 #[error("{0:?} is not a SID of the form S-1-<authority>-<subauthority>...")]
 pub struct InvalidSid(String);
 
+#[derive(Debug, thiserror::Error)]
+pub enum CurrentSidError {
+    #[error("finding the current user failed: {0}")]
+    Lookup(#[from] io::Error),
+    #[error(transparent)]
+    Invalid(#[from] InvalidSid),
+}
+
 impl Sid {
+    /// The user this process runs as.
+    pub fn current() -> Result<Self, CurrentSidError> {
+        Ok(Self::parse(&ipc::current_user_sid()?)?)
+    }
+
     pub fn parse(text: &str) -> Result<Self, InvalidSid> {
         let numbers = text
             .strip_prefix("S-1-")

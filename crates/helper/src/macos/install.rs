@@ -7,10 +7,8 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, chown};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use interprocess::local_socket::{GenericFilePath, ToFsName};
-
 use super::DAEMON_DATA_DIR;
-use crate::disconnect::{DisconnectError, disconnect};
+use crate::disconnect::{DisconnectError, disconnect_blocking};
 
 const HELPER_PATH: &str = "/Library/PrivilegedHelperTools/com.vyprlite.helper";
 const TRAY_DIR: &str = "/usr/local/libexec/vyprlite";
@@ -171,11 +169,7 @@ fn parse_home(output: &str) -> Option<PathBuf> {
 
 pub fn install() -> Result<(), InstallError> {
     let owner = sudo_owner()?;
-    let exe_dir = env::current_exe()
-        .map_err(InstallError::ExeDir)?
-        .parent()
-        .ok_or_else(|| InstallError::ExeDir(io::Error::other("the executable has no parent")))?
-        .to_owned();
+    let exe_dir = crate::exe_dir().map_err(InstallError::ExeDir)?;
 
     execute(&install_plan(&exe_dir, &owner, daemon_loaded()?))?;
     println!("VyprLite is installed and starts at your next login.");
@@ -242,15 +236,7 @@ fn execute(plan: &[Step]) -> Result<(), InstallError> {
                 owner,
             } => write(path, contents, *owner)?,
             Step::CreateWakeFile { owner } => create_wake_file(*owner)?,
-            Step::Disconnect => tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(DisconnectError::Io)?
-                .block_on(disconnect(
-                    ipc::DAEMON_SOCKET_PATH
-                        .to_fs_name::<GenericFilePath>()
-                        .map_err(DisconnectError::Io)?,
-                ))?,
+            Step::Disconnect => disconnect_blocking(ipc::DAEMON_SOCKET_PATH)?,
             Step::Bootout => {
                 run(LAUNCHCTL, &["bootout", &format!("system/{DAEMON_LABEL}")])?;
             }

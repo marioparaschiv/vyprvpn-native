@@ -1,7 +1,8 @@
 use std::backtrace::Backtrace;
+use std::fmt::Display;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
-use std::panic::{self, PanicHookInfo};
+use std::panic;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,7 +19,7 @@ pub fn record_panics_in(path: PathBuf) {
     }));
 }
 
-fn append(path: &Path, info: &PanicHookInfo) -> io::Result<()> {
+fn append(path: &Path, info: impl Display) -> io::Result<()> {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(io::Error::other)?
@@ -34,20 +35,21 @@ fn append(path: &Path, info: &PanicHookInfo) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs, process, thread};
+    use std::fs;
 
     use super::*;
 
     #[test]
-    fn writes_panics_to_the_crash_log() {
-        let path = env::temp_dir().join(format!("vyprlite-crash-log-test-{}.log", process::id()));
-        record_panics_in(path.clone());
+    fn appends_each_panic_to_the_crash_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("crash.log");
 
-        let panicked = thread::spawn(|| panic!("tunnel exploded")).join();
+        append(&path, "tunnel exploded").unwrap();
+        append(&path, "tunnel exploded again").unwrap();
+
         let log = fs::read_to_string(&path).unwrap();
-        fs::remove_file(&path).unwrap();
-
-        assert!(panicked.is_err());
-        assert!(log.contains("tunnel exploded"), "{log}");
+        let first = log.find("] tunnel exploded\n").unwrap();
+        let second = log.find("] tunnel exploded again\n").unwrap();
+        assert!(first < second, "{log}");
     }
 }

@@ -1,9 +1,10 @@
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use tunnel::{Teardown, TunnelError};
+
+use super::write_private;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TeardownStoreError {
@@ -33,14 +34,7 @@ impl TeardownStore {
     pub fn save(&self, teardown: &Teardown) -> Result<(), TeardownStoreError> {
         let json = serde_json::to_vec(teardown)?;
 
-        OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&self.path)
-            .and_then(|mut file| file.write_all(&json))
-            .map_err(|source| self.io_error(source))
+        write_private(&self.path, &json).map_err(|source| self.io_error(source))
     }
 
     /// Call once the tunnel is down. Succeeds when there is nothing to forget.
