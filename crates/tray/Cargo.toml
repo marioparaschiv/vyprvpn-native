@@ -1,0 +1,46 @@
+[package]
+name = "vyprlite-tray"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "VyprLite"
+path = "src/main.rs"
+
+[dependencies]
+env_logger.workspace = true
+gpui-kit.workspace = true
+interprocess.workspace = true
+ipc.workspace = true
+locations.workspace = true
+log.workspace = true
+notify-rust.workspace = true
+placement.workspace = true
+png.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
+tray-icon.workspace = true
+vypr-api.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Foundation", "UI_ViewManagement"] }
+windows-service.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Foundation"] }
+winsafe = { workspace = true, features = ["user"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-app-kit = { workspace = true, features = ["NSEvent", "NSScreen"] }
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+wiremock.workspace = true
+
+[lints]
+workspace = true
