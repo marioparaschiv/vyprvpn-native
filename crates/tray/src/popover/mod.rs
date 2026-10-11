@@ -8,6 +8,7 @@ pub mod dev;
 mod foreground;
 mod location_list;
 mod model;
+mod presence;
 mod smooth_scroll;
 pub mod toggle;
 
@@ -32,6 +33,7 @@ use crate::{flags, theme};
 use anchor::Anchor;
 use location_list::LocationList;
 use model::{ConnectAction, Detail, Headline, LocationRow, Tone};
+use presence::{Presence, Side};
 use smooth_scroll::SmoothScroll;
 
 const CONTEXT: &str = "LocationPopover";
@@ -67,8 +69,12 @@ pub struct Popover {
     locations: Entity<ListState<LocationList>>,
     focus_handle: FocusHandle,
     flag_dir: Option<PathBuf>,
+    presence: Presence,
+    toward_icon: Option<Side>,
     /// Redraws the connected-for time each second while connected.
     _ticks: Option<Task<()>>,
+    /// Removes the window once the exit has played.
+    _closing: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -107,7 +113,10 @@ impl Popover {
             .inspect_err(|error| log::warn!("flags are unavailable: {error}"))
             .ok();
         let (window, popover) = gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| Self::new(state, flag_dir, window, cx))
+            cx.new(|cx| Self {
+                toward_icon: anchor.toward_icon,
+                ..Self::new(state, flag_dir, window, cx)
+            })
         })?;
         // `cx.activate` does nothing on Windows; there the window takes the foreground itself.
         cx.activate(true);
@@ -143,7 +152,12 @@ impl Popover {
             locations,
             focus_handle,
             flag_dir,
+            presence: Presence::Entering {
+                since: cx.background_executor().now(),
+            },
+            toward_icon: None,
             _ticks: None,
+            _closing: None,
             _subscriptions,
         };
         popover.set_state(state, cx);
@@ -214,10 +228,10 @@ impl Popover {
             return;
         }
 
-        cx.spawn_in(window, async |_, cx| {
-            cx.update(|window, _| {
+        cx.spawn_in(window, async |this, cx| {
+            this.update_in(cx, |this, window, cx| {
                 if !window.is_window_active() {
-                    window.remove_window();
+                    this.close(window, cx);
                 }
             })
         })
@@ -255,8 +269,29 @@ impl Popover {
     fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.page {
             Page::Locations => self.show_main(window, cx),
-            Page::Main => window.remove_window(),
+            Page::Main => self.close(window, cx),
         }
+    }
+
+    /// Fades the card out, then removes the window.
+    pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.presence, Presence::Exiting { .. }) {
+            return;
+        }
+
+        let motion = cx.theme().motion_tokens();
+        let now = cx.background_executor().now();
+        let duration = motion.duration_fast;
+        let (from, _) = self.presence.shown(now, motion);
+
+        self.presence = Presence::Exiting { since: now, from };
+        self._closing = Some(cx.spawn_in(window, async move |_, cx| {
+            cx.background_executor().timer(duration).await;
+            if let Err(error) = cx.update(|window, _| window.remove_window()) {
+                log::debug!("the popover had already closed: {error}");
+            }
+        }));
+        cx.notify();
     }
 
     fn render_main(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -464,6 +499,23 @@ impl Popover {
 impl Render for Popover {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let motion = cx.theme().motion_tokens();
+        let (entered, moving) = self.presence.shown(cx.background_executor().now(), motion);
+        if moving {
+            window.request_animation_frame();
+        }
+        let travel = if cx.reduce_motion() {
+            px(0.)
+        } else {
+            motion.distance_medium.to_pixels(window.rem_size()) * (1. - entered)
+        };
+        let (left, top) = match self.toward_icon {
+            Some(Side::Top) => (px(0.), -travel),
+            Some(Side::Bottom) => (px(0.), travel),
+            Some(Side::Left) => (-travel, px(0.)),
+            Some(Side::Right) => (travel, px(0.)),
+            None => (px(0.), px(0.)),
+        };
+
         let shown = match self.page {
             Page::Main => 0.,
             Page::Locations => 1.,
@@ -484,6 +536,18 @@ impl Render for Popover {
                 .on_action(cx.listener(|this, _: &Escape, window, cx| this.dismiss(window, cx)))
                 .size_full()
                 .popover_style(cx)
+                .map(|mut card| {
+                    // GPUI fades each primitive on its own, so a full shadow would show through
+                    // the half-faded card; it follows the cube of the fade to stay hidden under it.
+                    for shadow in card.style().box_shadow.iter_mut().flatten() {
+                        shadow.color = shadow.color.opacity(entered.powi(3));
+                    }
+                    card
+                })
+                .relative()
+                .left(left)
+                .top(top)
+                .opacity(entered)
                 .rounded(cx.theme().radius_lg)
                 .overflow_hidden()
                 .child(
@@ -553,8 +617,9 @@ fn flag(flag_dir: Option<&Path>, country_code: &str, cx: &App) -> AnyElement {
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
+    use std::time::Duration;
 
-    use gpui_kit::component::IndexPath;
+    use gpui_kit::component::{ActiveTheme, IndexPath};
     use gpui_kit::{AppContext, Empty, Entity, TestAppContext, VisualTestContext};
     use ipc::Status;
 
@@ -577,6 +642,10 @@ mod tests {
     }
 
     type Events = Rc<RefCell<Vec<PopoverEvent>>>;
+
+    fn exit_duration(cx: &mut VisualTestContext) -> Duration {
+        cx.update(|_, cx| cx.theme().motion_tokens().duration_fast)
+    }
 
     fn open(
         state: LinkState,
@@ -684,6 +753,11 @@ mod tests {
 
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
+        assert_eq!(cx.windows().len(), 1, "the card fades out first");
+
+        let exit = exit_duration(cx);
+        cx.executor().advance_clock(exit);
+        cx.run_until_parked();
         assert!(cx.windows().is_empty());
     }
 
@@ -695,6 +769,8 @@ mod tests {
         assert_eq!(cx.windows().len(), 1);
 
         cx.deactivate_window();
+        let exit = exit_duration(cx);
+        cx.executor().advance_clock(exit);
         cx.run_until_parked();
 
         assert!(cx.windows().is_empty());

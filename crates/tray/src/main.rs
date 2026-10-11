@@ -236,8 +236,8 @@ fn start(
                                 popover.open = open_popover(cx, icon, state, &events).await;
                             }
                             Toggle::Close => {
-                                if let Some(window) = popover.window() {
-                                    close_popover(cx, window);
+                                if let Some((window, open)) = &popover.open {
+                                    close_popover(cx, *window, open);
                                 }
                             }
                             Toggle::Nothing => {}
@@ -341,8 +341,10 @@ fn show_in_popover(
     }
 }
 
-fn close_popover(cx: &mut AsyncApp, window: AnyWindowHandle) {
-    if let Err(error) = window.update(cx, |_, window, _| window.remove_window()) {
+fn close_popover(cx: &mut AsyncApp, window: AnyWindowHandle, popover: &Entity<Popover>) {
+    if let Err(error) = window.update(cx, |_, window, cx| {
+        popover.update(cx, |popover, cx| popover.close(window, cx));
+    }) {
         log::debug!("the popover had already closed: {error}");
     }
 }

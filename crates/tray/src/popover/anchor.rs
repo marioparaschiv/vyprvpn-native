@@ -4,6 +4,7 @@
 use gpui_kit::{App, Bounds, DisplayId, Pixels, Point, point, px};
 use placement::{LogicalSize, PhysicalRect};
 
+use super::presence::{self, Side};
 use super::{CARD, Popover, SHADOW_MARGIN};
 
 #[derive(Debug, thiserror::Error)]
@@ -40,6 +41,8 @@ pub struct Monitor {
 pub struct Anchor {
     pub display: Option<DisplayId>,
     pub origin: Point<Pixels>,
+    /// The card's side facing the tray icon, which it enters from.
+    pub toward_icon: Option<Side>,
 }
 
 impl Anchor {
@@ -48,6 +51,7 @@ impl Anchor {
         Self {
             display: None,
             origin: Bounds::centered(None, Popover::window_size(), cx).origin,
+            toward_icon: None,
         }
     }
 }
@@ -71,6 +75,12 @@ pub fn anchor(icon: PhysicalRect, monitor: &Monitor) -> Anchor {
     };
     let card_origin =
         placement::popover_origin(icon, monitor.bounds, monitor.work_area, card, monitor.scale);
+    let card_rect = PhysicalRect {
+        x: card_origin.x,
+        y: card_origin.y,
+        width: (card.width * monitor.scale).ceil() as i32,
+        height: (card.height * monitor.scale).ceil() as i32,
+    };
 
     Anchor {
         display: monitor.display,
@@ -78,6 +88,7 @@ pub fn anchor(icon: PhysicalRect, monitor: &Monitor) -> Anchor {
             px(card_origin.x as f32 / monitor.scale) - SHADOW_MARGIN,
             px(card_origin.y as f32 / monitor.scale) - SHADOW_MARGIN,
         ),
+        toward_icon: presence::facing(card_rect, icon),
     }
 }
 
@@ -268,6 +279,7 @@ mod tests {
                 display: Some(DisplayId::new(1)),
                 // The card at physical (1263, 378) is logical (842, 252).
                 origin: point(px(842.) - SHADOW_MARGIN, px(252.) - SHADOW_MARGIN),
+                toward_icon: Some(Side::Bottom),
             }
         );
     }
