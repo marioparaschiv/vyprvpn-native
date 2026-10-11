@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use ::globe::Canvas;
-use ::globe::motion::{Marker, Motion, Pose, Target};
+use ::globe::motion::{Marker, Motion, Pose, Target, ZOOM};
 use ::globe::places;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
@@ -23,6 +23,9 @@ use crate::icons;
 const CENTRE_Y: f32 = 125.;
 const RADIUS: f32 = 185.;
 const HEIGHT: f32 = 310.;
+/// Where the facing point sits once fully zoomed in: up and right of the status icon, so the
+/// marker stays clear of it and of the headline.
+const ZOOMED_CENTRE: (f32, f32) = (250., 70.);
 
 /// Faint enough that text over the dots stays readable.
 const OPACITY: f32 = 0.14;
@@ -130,15 +133,18 @@ impl Globe {
     }
 }
 
-/// The canvas in device pixels. Each dot covers whole device pixels: one on standard displays, two
+/// The canvas in device pixels. The globe's centre slides toward [`ZOOMED_CENTRE`] as it zooms. Each dot covers whole device pixels: one on standard displays, two
 /// from 150% scale up.
 fn canvas(scale: f32, pose: Pose) -> Canvas {
-    let width = CARD.width.as_f32() * scale;
+    let width = CARD.width.as_f32();
+    let zoomed = (pose.zoom - 1.) / (ZOOM - 1.);
+    let centre_x = width / 2. + (ZOOMED_CENTRE.0 - width / 2.) * zoomed;
+    let centre_y = CENTRE_Y + (ZOOMED_CENTRE.1 - CENTRE_Y) * zoomed;
 
     Canvas {
-        width: width.round() as u32,
+        width: (width * scale).round() as u32,
         height: (HEIGHT * scale).round() as u32,
-        centre: (width / 2., CENTRE_Y * scale),
+        centre: (centre_x * scale, centre_y * scale),
         radius: RADIUS * pose.zoom * scale,
         facing: pose.facing,
         dot: if scale >= 1.5 { TWO } else { NonZeroU32::MIN },
@@ -192,7 +198,9 @@ mod tests {
     use ::globe::Coordinates;
     use ipc::Status;
 
-    use super::target;
+    use std::time::{Duration, Instant};
+
+    use super::{Globe, ZOOMED_CENTRE, canvas, target};
     use crate::helper_link::{HelperState, Locations};
     use crate::popover::model::tests::state;
     use crate::popover::recorded_locations;
@@ -235,5 +243,27 @@ mod tests {
         assert_eq!(target(&state), Target::Home);
         state.helper = HelperState::NotRunning;
         assert_eq!(target(&state), Target::Home);
+    }
+
+    #[test]
+    fn the_server_ends_up_clear_of_the_status_icon() {
+        let perth = Coordinates {
+            lon: 115.8589,
+            lat: -31.9522,
+        };
+        let start = Instant::now();
+        let mut globe = Globe::new(Target::Spin, start, false);
+        globe.set_target(Target::Place(perth), start + Duration::from_secs(2), false);
+        let scene = globe.motion.scene(start + Duration::from_secs(10));
+        assert!(!scene.moving);
+
+        for scale in [1., 1.25, 1.5, 2.] {
+            let (x, y) = canvas(scale, scene.pose).project(perth).unwrap();
+            assert!(
+                (x / scale - ZOOMED_CENTRE.0).abs() < 0.01
+                    && (y / scale - ZOOMED_CENTRE.1).abs() < 0.01,
+                "({x}, {y}) at {scale}x"
+            );
+        }
     }
 }
