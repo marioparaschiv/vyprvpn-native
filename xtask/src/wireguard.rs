@@ -15,7 +15,8 @@ pub const DLL_NAME: &str = "wireguard.dll";
 pub const SIGNER: &str = "WireGuard LLC";
 
 const SIGNED_FILE_VAR: &str = "VYPRVPN_SIGNED_FILE";
-const SIGNATURE_SCRIPT: &str = "$s = Get-AuthenticodeSignature -LiteralPath $env:VYPRVPN_SIGNED_FILE; \
+const SIGNATURE_SCRIPT: &str = "$ErrorActionPreference = 'Stop'; \
+     $s = Get-AuthenticodeSignature -LiteralPath $env:VYPRVPN_SIGNED_FILE; \
      $s.Status.ToString(); $s.SignerCertificate.Subject";
 
 /// Returns the path of the amd64 `wireguard.dll`, extracted from the pinned
