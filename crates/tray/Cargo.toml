@@ -37,7 +37,8 @@ winsafe = { workspace = true, features = ["dwm", "user"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
-objc2-app-kit = { workspace = true, features = ["NSEvent", "NSScreen"] }
+objc2-app-kit = { workspace = true, features = ["NSBitmapImageRep", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSScreen"] }
+objc2-foundation.workspace = true
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }

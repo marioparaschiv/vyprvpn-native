@@ -53,6 +53,7 @@ notify-rust = "4.18.2"
 rustix = { version = "1.1.5", default-features = false, features = ["std"] }
 winsafe = { version = "0.0.29", default-features = false }
 objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSGeometry", "NSString"] }
 raw-window-handle = { version = "0.6.2", features = ["std"] }
 globe = { path = "crates/globe" }
 image = { version = "0.25.10", default-features = false }

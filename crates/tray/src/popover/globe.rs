@@ -1,6 +1,6 @@
 //! The dithered globe behind the main page's status: at rest while disconnected, spinning while
-//! connecting, and turned and zoomed onto the server, marked with the tray's connected dot, once
-//! connected. It is redrawn only for the frames in which it moves.
+//! connecting, and turned and zoomed onto the server, marked with a ringed dot in the
+//! tray's connected colour, once connected. It is redrawn only for the frames in which it moves.
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -34,6 +34,10 @@ const TWO: NonZeroU32 = NonZeroU32::new(2).unwrap();
 
 /// The marker's diameter at full size, in logical pixels.
 const MARKER: f32 = 12.;
+/// The marker's ring width as a share of its radius.
+const MARKER_RING_SHARE: f32 = 0.23;
+/// The ring's brightness relative to the fill.
+const MARKER_RING_SHADE_PERCENT: u32 = 72;
 
 pub struct Globe {
     motion: Motion,
@@ -173,11 +177,11 @@ fn draw(canvas: &Canvas, color: Rgba) -> Arc<RenderImage> {
     Arc::new(RenderImage::new([Frame::new(buffer)]))
 }
 
-/// The tray's connected dot, ringed the same way, centred on the marked place.
+/// A dot in the tray's connected colour, ringed darker, centred on the marked place.
 fn render_marker(marker: Marker, canvas: &Canvas, scale: f32) -> Option<Div> {
     let (x, y) = canvas.project(marker.at)?;
     let diameter = MARKER * marker.scale;
-    let [fill, ring] = [icons::CONNECTED, icons::darker(icons::CONNECTED)]
+    let [fill, ring] = [icons::CONNECTED, darker(icons::CONNECTED)]
         .map(|[r, g, b]| rgb(u32::from_be_bytes([0, r, g, b])));
 
     Some(
@@ -188,9 +192,15 @@ fn render_marker(marker: Marker, canvas: &Canvas, scale: f32) -> Option<Div> {
             .size(px(diameter))
             .rounded_full()
             .bg(fill)
-            .border(px(diameter / 2. * icons::BORDER_SHARE))
+            .border(px(diameter / 2. * MARKER_RING_SHARE))
             .border_color(ring),
     )
+}
+
+fn darker([r, g, b]: [u8; 3]) -> [u8; 3] {
+    let shade = |channel: u8| ((channel as u32 * MARKER_RING_SHADE_PERCENT + 50) / 100) as u8;
+
+    [shade(r), shade(g), shade(b)]
 }
 
 #[cfg(test)]
@@ -200,7 +210,7 @@ mod tests {
 
     use std::time::{Duration, Instant};
 
-    use super::{Globe, ZOOMED_CENTRE, canvas, target};
+    use super::{Globe, ZOOMED_CENTRE, canvas, darker, target};
     use crate::helper_link::{HelperState, Locations};
     use crate::popover::model::tests::state;
     use crate::popover::recorded_locations;
@@ -212,6 +222,13 @@ mod tests {
             tunnel_ip: [10, 1, 2, 3].into(),
             connected_at: 1_760_140_800,
         }
+    }
+
+    #[test]
+    fn ring_is_the_fill_darkened_by_28_percent() {
+        assert_eq!(darker([0xF2, 0xA9, 0x00]), [0xAE, 0x7A, 0x00]);
+        assert_eq!(darker([0x2E, 0xB8, 0x4F]), [0x21, 0x84, 0x39]);
+        assert_eq!(darker([0xFF, 0xFF, 0xFF]), [0xB8, 0xB8, 0xB8]);
     }
 
     #[test]

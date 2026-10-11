@@ -1,7 +1,7 @@
 use ipc::{Account, Status};
 use notify_rust::Notification;
 use tray_icon::menu::{self, Menu, MenuId, MenuItem, PredefinedMenuItem};
-use tray_icon::{BadIcon, TrayIcon, TrayIconBuilder};
+use tray_icon::{TrayIcon, TrayIconBuilder};
 
 use crate::helper_link::{HelperState, LinkState, Locations};
 use crate::icons::{self, IconKind};
@@ -9,7 +9,7 @@ use crate::icons::{self, IconKind};
 #[derive(Debug, thiserror::Error)]
 pub enum TrayError {
     #[error("building the tray icon image failed: {0}")]
-    Icon(#[from] BadIcon),
+    Icon(#[from] icons::IconError),
     #[error("building the tray menu failed: {0}")]
     Menu(#[from] menu::Error),
     #[error("updating the tray icon failed: {0}")]
@@ -56,8 +56,12 @@ impl TrayMenu {
             &account,
             &exit,
         ])?;
-        let icon = TrayIconBuilder::new()
-            .with_icon(icons::icon(shown.icon)?)
+        let builder = TrayIconBuilder::new();
+        #[cfg(target_os = "macos")]
+        let builder = builder.with_icon_templated(icons::icon(shown.icon)?);
+        #[cfg(not(target_os = "macos"))]
+        let builder = builder.with_icon(icons::icon(shown.icon)?);
+        let icon = builder
             .with_tooltip(&shown.tooltip)
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
@@ -107,7 +111,11 @@ impl TrayMenu {
             self.icon.set_tooltip(Some(&view.tooltip))?;
         }
         if view.icon != self.shown.icon {
-            self.icon.set_icon(Some(icons::icon(view.icon)?))?;
+            let icon = icons::icon(view.icon)?;
+            #[cfg(target_os = "macos")]
+            self.icon.set_icon_templated(Some(icon))?;
+            #[cfg(not(target_os = "macos"))]
+            self.icon.set_icon(Some(icon))?;
         }
         self.shown = view;
 
