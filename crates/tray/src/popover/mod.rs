@@ -4,6 +4,8 @@
 pub mod anchor;
 #[cfg(debug_assertions)]
 pub mod dev;
+#[cfg(target_os = "windows")]
+mod foreground;
 mod location_list;
 mod model;
 pub mod toggle;
@@ -105,10 +107,12 @@ impl Popover {
         let (window, popover) = gpui_kit::open_window(options, cx, |window, cx| {
             cx.new(|cx| Self::new(state, flag_dir, window, cx))
         })?;
-        // `cx.activate` does nothing on Windows; the window must take the foreground itself, which
-        // the tray click allows.
+        // `cx.activate` does nothing on Windows; there the window takes the foreground itself.
         cx.activate(true);
-        window.update(cx, |_, window, _| window.activate_window())?;
+        #[cfg(target_os = "windows")]
+        if let Err(error) = window.update(cx, |_, window, _| foreground::take(window))? {
+            log::warn!("the popover may close on its first click: {error}");
+        }
 
         Ok((window, popover))
     }

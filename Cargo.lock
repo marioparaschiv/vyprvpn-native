@@ -8973,6 +8973,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "placement",
  "png 0.18.1",
+ "raw-window-handle",
  "serde",
  "tempfile",
  "thiserror 2.0.21",
