@@ -1,0 +1,33 @@
+[package]
+name = "vyprlite-helper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+env_logger.workspace = true
+interprocess.workspace = true
+ipc.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
+tunnel.workspace = true
+vypr-api.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+widestring.workspace = true
+windows-dpapi.workspace = true
+windows-service.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Foundation"] }
+winreg.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+wiremock.workspace = true
+
+[lints]
+workspace = true
