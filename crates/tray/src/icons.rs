@@ -19,7 +19,7 @@ const BORDER_SHADE_PERCENT: u32 = 72;
 
 const GREY: [u8; BYTES] = dot([0x9E, 0x9E, 0x9E]);
 const AMBER: [u8; BYTES] = dot([0xF2, 0xA9, 0x00]);
-const GREEN: [u8; BYTES] = dot([0x2E, 0xB8, 0x4F]);
+const GREEN: [u8; BYTES] = dot([0x8E, 0xE0, 0xA1]);
 
 /// Which tray icon shows: grey disconnected, amber busy, green connected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,14 +120,14 @@ mod tests {
         assert_eq!(pixel(&AMBER, SIZE / 2, SIZE / 2), [0xF2, 0xA9, 0x00, 0xFF]);
         assert_eq!(
             pixel(&GREEN, SIZE / 2 - 1, SIZE / 2 - 1),
-            [0x2E, 0xB8, 0x4F, 0xFF]
+            [0x8E, 0xE0, 0xA1, 0xFF]
         );
     }
 
     #[test]
     fn ring_band_is_the_opaque_border() {
         // Row 3 spans 12 to 13 px from the centre, between the fill's 11.5 and the dot's 15.
-        assert_eq!(pixel(&GREEN, SIZE / 2, 3), [0x21, 0x84, 0x39, 0xFF]);
+        assert_eq!(pixel(&GREEN, SIZE / 2, 3), [0x66, 0xA1, 0x74, 0xFF]);
         assert_eq!(pixel(&GREY, 3, SIZE / 2), [0x72, 0x72, 0x72, 0xFF]);
     }
 
@@ -143,11 +143,11 @@ mod tests {
         // Straddles the dot's rim on the diagonal, 14.1 to 15.6 px from the centre.
         let rim = pixel(&GREEN, 5, 5);
         assert!(0 < rim[3] && rim[3] < 0xFF, "rim alpha {}", rim[3]);
-        assert_eq!(rim[..3], [0x21, 0x84, 0x39]);
+        assert_eq!(rim[..3], [0x66, 0xA1, 0x74]);
 
         // Straddles the fill's edge at 11.5 px: opaque, between fill and border.
         let seam = pixel(&GREEN, SIZE / 2, 4);
         assert_eq!(seam[3], 0xFF);
-        assert!(0x84 < seam[1] && seam[1] < 0xB8, "seam green {}", seam[1]);
+        assert!(0xA1 < seam[1] && seam[1] < 0xE0, "seam green {}", seam[1]);
     }
 }
