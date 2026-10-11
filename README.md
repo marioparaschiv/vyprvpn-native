@@ -37,17 +37,19 @@ target/debug/VyprVPN --console
 - They never touch an installed service.
 - The console helper exits 5 s after the last tray app disconnects.
 
-## Build a distributable (Windows)
+## Build a distributable
 
 ```sh
 cargo xtask dist
 ```
 
-This writes `dist/` with:
+On Windows this writes `dist/` with:
 
 - `VyprVPN.exe` (release build, with the VyprVPN icon)
 - `vyprvpn-helper.exe` (release build)
 - `wireguard.dll` (official WireGuardNT 1.1, amd64)
+
+On macOS it writes `dist/VyprVPN.app`, holding both release builds and the VyprVPN icon.
 
 > **Never commit the DLL.**
 
@@ -88,9 +90,9 @@ At runtime:
 
 > **Needs `sudo`.** Run it from your own account.
 
-1. `cargo build --release`
-2. `cd target/release` (or any folder holding `vyprvpn-helper` and `VyprVPN`)
-3. `sudo ./vyprvpn-helper install`
+1. `cargo xtask dist`
+2. Move `dist/VyprVPN.app` to `/Applications`.
+3. `sudo /Applications/VyprVPN.app/Contents/MacOS/vyprvpn-helper install`
 
 What install does:
 

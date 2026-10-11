@@ -1,3 +1,4 @@
+mod app_bundle;
 mod land_mask;
 mod wireguard;
 
@@ -25,6 +26,8 @@ enum Error {
     },
     #[error("release build failed: {0}")]
     Build(ExitStatus),
+    #[error("codesign {} failed: {status}", path.display())]
+    Codesign { path: PathBuf, status: ExitStatus },
     #[error("downloading {url}: {source}")]
     Download { url: String, source: reqwest::Error },
     #[error("SHA256 mismatch for {}: expected {expected}, got {actual}", path.display())]
@@ -79,7 +82,13 @@ fn dist() -> Result<(), Error> {
         .map(|dir| root.join(dir))
         .unwrap_or_else(|| root.join("target"));
 
-    let dll = wireguard::fetch_verified_dll(&target_dir.join("wireguard-nt"))?;
+    let dll = if cfg!(target_os = "macos") {
+        None
+    } else {
+        Some(wireguard::fetch_verified_dll(
+            &target_dir.join("wireguard-nt"),
+        )?)
+    };
     build_release(&root, &target_dir)?;
 
     let dist_dir = root.join("dist");
@@ -89,10 +98,19 @@ fn dist() -> Result<(), Error> {
     fs::create_dir_all(&dist_dir).map_err(io_error("creating", &dist_dir))?;
 
     let release_dir = target_dir.join("release");
-    for binary in BINARIES {
-        copy(&release_dir.join(binary), &dist_dir.join(binary))?;
+    match dll {
+        Some(dll) => {
+            for binary in BINARIES {
+                copy(&release_dir.join(binary), &dist_dir.join(binary))?;
+            }
+            copy(&dll, &dist_dir.join(wireguard::DLL_NAME))?;
+        }
+        None => app_bundle::write(
+            &root.join("crates/tray/assets"),
+            &release_dir,
+            &dist_dir.join("VyprVPN.app"),
+        )?,
     }
-    copy(&dll, &dist_dir.join(wireguard::DLL_NAME))?;
 
     println!("dist ready: {}", dist_dir.display());
     Ok(())
