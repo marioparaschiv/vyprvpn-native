@@ -106,7 +106,8 @@ fn extract_entry(
 }
 
 fn query_signature(path: &Path) -> Result<(String, String), Error> {
-    // The path goes through the environment so it is never parsed as PowerShell.
+    // The path goes through the environment so it is never parsed as PowerShell. PowerShell 7
+    // leaves its own module paths in PSModulePath, which Windows PowerShell then fails to load.
     let output = Command::new("powershell.exe")
         .args([
             "-NoProfile",
@@ -115,6 +116,7 @@ fn query_signature(path: &Path) -> Result<(String, String), Error> {
             SIGNATURE_SCRIPT,
         ])
         .env(SIGNED_FILE_VAR, path)
+        .env_remove("PSModulePath")
         .output()
         .map_err(|source| Error::Spawn {
             program: "powershell.exe",
