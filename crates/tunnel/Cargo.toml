@@ -1,0 +1,29 @@
+[package]
+name = "tunnel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+getrandom.workspace = true
+ipnet.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+x25519-dalek.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+libloading.workspace = true
+wireguard-nt.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+boringtun.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
