@@ -18,7 +18,7 @@ const INNER_RADIUS: i32 = OUTER_RADIUS - BORDER_WIDTH;
 const BORDER_SHADE_PERCENT: u32 = 72;
 
 const GREY: [u8; BYTES] = dot([0x9E, 0x9E, 0x9E]);
-const BLUE: [u8; BYTES] = dot([0x9C, 0xC7, 0xF2]);
+const BLUE: [u8; BYTES] = dot([0x4C, 0xB1, 0xF5]);
 const GREEN: [u8; BYTES] = dot([0x8E, 0xE0, 0xA1]);
 
 /// Which tray icon shows: grey disconnected, blue busy, green connected.
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn centre_is_the_opaque_fill() {
-        assert_eq!(pixel(&BLUE, SIZE / 2, SIZE / 2), [0x9C, 0xC7, 0xF2, 0xFF]);
+        assert_eq!(pixel(&BLUE, SIZE / 2, SIZE / 2), [0x4C, 0xB1, 0xF5, 0xFF]);
         assert_eq!(
             pixel(&GREEN, SIZE / 2 - 1, SIZE / 2 - 1),
             [0x8E, 0xE0, 0xA1, 0xFF]
