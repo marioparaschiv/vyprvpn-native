@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::env;
 use std::fs;
 use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
@@ -8,12 +7,14 @@ use std::thread;
 use ipc::Location;
 use tokio::task::JoinSet;
 
+use crate::app_dir::{self, MissingEnv};
+
 #[derive(Debug, thiserror::Error)]
 pub enum FlagError {
     #[error("{0:?} is not a three-letter country code")]
     CountryCode(String),
-    #[error("environment variable {0} is not set")]
-    MissingEnv(&'static str),
+    #[error(transparent)]
+    MissingEnv(#[from] MissingEnv),
     #[error("accessing {path} failed: {source}")]
     Cache { path: PathBuf, source: io::Error },
     #[error("downloading the flag failed: {0}")]
@@ -70,7 +71,7 @@ async fn cache_all(country_codes: BTreeSet<String>) {
 
 /// `%LOCALAPPDATA%\VyprVPN\flags` on Windows, `~/Library/Caches/VyprVPN/flags` on macOS.
 pub fn cache_dir() -> Result<PathBuf, FlagError> {
-    let path = caches_root()?.join("VyprVPN").join("flags");
+    let path = app_dir::cache_dir()?.join("flags");
 
     fs::create_dir_all(&path).map_err(|source| FlagError::Cache {
         path: path.clone(),
@@ -78,20 +79,6 @@ pub fn cache_dir() -> Result<PathBuf, FlagError> {
     })?;
 
     Ok(path)
-}
-
-#[cfg(windows)]
-fn caches_root() -> Result<PathBuf, FlagError> {
-    env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .ok_or(FlagError::MissingEnv("LOCALAPPDATA"))
-}
-
-#[cfg(target_os = "macos")]
-fn caches_root() -> Result<PathBuf, FlagError> {
-    let home = env::var_os("HOME").ok_or(FlagError::MissingEnv("HOME"))?;
-
-    Ok(PathBuf::from(home).join("Library").join("Caches"))
 }
 
 /// The cached file name for `country_code`'s flag, inside `cache_dir()`.

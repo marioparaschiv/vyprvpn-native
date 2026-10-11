@@ -3,9 +3,11 @@
 #[cfg(not(any(windows, target_os = "macos")))]
 compile_error!("the VyprVPN tray app supports only Windows and macOS");
 
+mod app_dir;
 mod flags;
 mod helper_link;
 mod icons;
+mod instance;
 mod login_window;
 mod popover;
 mod service;
@@ -87,6 +89,18 @@ fn main() -> ExitCode {
 
     let helper = match helper(std::env::args().skip(1)) {
         Ok(helper) => helper,
+        Err(error) => {
+            log::error!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let _instance = match instance::claim() {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            log::info!("VyprVPN is already running");
+            return ExitCode::SUCCESS;
+        }
         Err(error) => {
             log::error!("{error}");
             return ExitCode::FAILURE;
