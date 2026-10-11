@@ -7,6 +7,7 @@ mod backdrop;
 pub mod dev;
 #[cfg(target_os = "windows")]
 mod foreground;
+mod globe;
 #[cfg(target_os = "windows")]
 mod hwnd;
 mod location_list;
@@ -35,6 +36,7 @@ use crate::helper_link::{HelperState, LinkState, Locations};
 use crate::{flags, theme};
 use anchor::Anchor;
 use backdrop::Surface;
+use globe::Globe;
 use location_list::LocationList;
 use model::{ConnectAction, Detail, Headline, LocationRow, Tone};
 use presence::{Presence, Side};
@@ -74,6 +76,7 @@ pub struct Popover {
     presence: Presence,
     toward_icon: Option<Side>,
     surface: Surface,
+    globe: Globe,
     /// Redraws the connected-for time each second while connected.
     _ticks: Option<Task<()>>,
     /// Removes the window once the exit has played.
@@ -166,6 +169,7 @@ impl Popover {
             },
             toward_icon: None,
             surface: Surface::default(),
+            globe: Globe::default(),
             _ticks: None,
             _closing: None,
             _subscriptions,
@@ -542,6 +546,7 @@ impl Render for Popover {
         // The page being shown is mounted from the first frame of the slide, so it can take focus.
         let main_mounted = self.page == Page::Main || progress < 1.;
         let locations_mounted = self.page == Page::Locations || progress > 0.;
+        let globe = main_mounted.then(|| self.globe.render(window, cx));
 
         let fill = match self.surface {
             Surface::Blurred => theme::translucent_popover(cx),
@@ -569,7 +574,9 @@ impl Render for Popover {
                     .left(left - CARD.width * progress)
                     .top(top)
                     .opacity(entered)
-                    .child(page().when(main_mounted, |page| page.child(self.render_main(cx))))
+                    .child(page().when_some(globe, |page, globe| {
+                        page.relative().child(globe).child(self.render_main(cx))
+                    }))
                     .child(page().when(locations_mounted, |page| {
                         page.child(self.render_locations(cx))
                     })),

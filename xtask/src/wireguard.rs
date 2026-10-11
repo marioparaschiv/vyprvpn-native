@@ -54,7 +54,7 @@ fn verified_zip(cache_dir: &Path, zip_path: &Path) -> Result<Vec<u8>, Error> {
     Ok(archive)
 }
 
-fn download(url: &str) -> Result<Vec<u8>, Error> {
+pub(crate) fn download(url: &str) -> Result<Vec<u8>, Error> {
     let error = |source| Error::Download {
         url: url.to_owned(),
         source,
@@ -67,7 +67,7 @@ fn download(url: &str) -> Result<Vec<u8>, Error> {
     Ok(body.to_vec())
 }
 
-fn verify_sha256(bytes: &[u8], expected: &str, path: &Path) -> Result<(), Error> {
+pub(crate) fn verify_sha256(bytes: &[u8], expected: &str, path: &Path) -> Result<(), Error> {
     let actual: String = Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))

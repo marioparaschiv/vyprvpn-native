@@ -2698,6 +2698,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
+name = "globe"
+version = "0.1.0"
+dependencies = [
+ "image",
+]
+
+[[package]]
 name = "globset"
 version = "0.4.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8963,7 +8970,9 @@ name = "vyprlite-tray"
 version = "0.1.0"
 dependencies = [
  "env_logger",
+ "globe",
  "gpui-kit",
+ "image",
  "interprocess",
  "ipc",
  "locations",
@@ -10356,7 +10365,10 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "globe",
  "reqwest",
+ "serde",
+ "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.21",
  "zip",

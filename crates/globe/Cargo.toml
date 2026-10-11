@@ -1,0 +1,12 @@
+[package]
+name = "globe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+image = { workspace = true, features = ["png"] }
+
+[lints]
+workspace = true

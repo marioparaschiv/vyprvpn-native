@@ -1,3 +1,4 @@
+mod land_mask;
 mod wireguard;
 
 use std::env;
@@ -9,7 +10,7 @@ const BINARIES: [&str; 2] = ["VyprLite.exe", "vyprlite-helper.exe"];
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
-    #[error("usage: cargo xtask dist")]
+    #[error("usage: cargo xtask dist | land-mask")]
     Usage,
     #[error("{action} {}: {source}", path.display())]
     Io {
@@ -32,6 +33,8 @@ enum Error {
         expected: String,
         actual: String,
     },
+    #[error("parsing the land polygons: {0}")]
+    LandData(serde_json::Error),
     #[error("reading {entry} from {}: {source}", archive.display())]
     Zip {
         archive: PathBuf,
@@ -55,6 +58,9 @@ enum Error {
 fn main() -> ExitCode {
     let result = match env::args().nth(1).as_deref() {
         Some("dist") => dist(),
+        Some("land-mask") => {
+            land_mask::generate(&workspace_root().join("crates/globe/src/land.bin"))
+        }
         _ => Err(Error::Usage),
     };
 

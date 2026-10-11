@@ -11,7 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 env_logger.workspace = true
+globe.workspace = true
 gpui-kit.workspace = true
+image.workspace = true
 interprocess.workspace = true
 ipc.workspace = true
 locations.workspace = true
