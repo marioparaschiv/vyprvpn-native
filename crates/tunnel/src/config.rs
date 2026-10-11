@@ -9,7 +9,7 @@ use crate::keys::{KeyError, PresharedKey, PrivateKey, PublicKey};
 
 /// Split default route, as the official client does, so WireGuard does not engage its own kill
 /// switch.
-pub const ALLOWED_IPS: [Ipv4Net; 2] = [
+const ALLOWED_IPS: [Ipv4Net; 2] = [
     Ipv4Net::new_assert(Ipv4Addr::new(0, 0, 0, 0), 1),
     Ipv4Net::new_assert(Ipv4Addr::new(128, 0, 0, 0), 1),
 ];

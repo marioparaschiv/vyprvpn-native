@@ -14,8 +14,8 @@ pub enum KeyError {
     Base64(#[from] base64::DecodeError),
     #[error("key is {0} bytes, expected {KEY_LEN}")]
     Length(usize),
-    #[error("generating a private key: {0}")]
-    Random(getrandom::Error),
+    #[error("generating a private key")]
+    Random(#[source] getrandom::Error),
 }
 
 fn decode_key(encoded: &str) -> Result<Zeroizing<[u8; KEY_LEN]>, KeyError> {
@@ -119,6 +119,7 @@ impl fmt::Debug for PresharedKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures::PEER_PUBLIC;
 
     // RFC 7748 section 6.1 test vector (Alice).
     const PRIVATE: [u8; KEY_LEN] = [
@@ -126,20 +127,19 @@ mod tests {
         0x45, 0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a, 0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9,
         0x2c, 0x2a,
     ];
-    const PUBLIC_BASE64: &str = "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=";
 
     #[test]
     fn derives_the_rfc_7748_public_key() {
         let public = PrivateKey::from_bytes(PRIVATE).public_key();
 
-        assert_eq!(public.to_string(), PUBLIC_BASE64);
+        assert_eq!(public.to_string(), PEER_PUBLIC);
     }
 
     #[test]
     fn public_key_round_trips_through_base64() {
-        let public: PublicKey = PUBLIC_BASE64.parse().unwrap();
+        let public: PublicKey = PEER_PUBLIC.parse().unwrap();
 
-        assert_eq!(public.to_string(), PUBLIC_BASE64);
+        assert_eq!(public.to_string(), PEER_PUBLIC);
         assert_eq!(public, PrivateKey::from_bytes(PRIVATE).public_key());
     }
 
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn secrets_are_redacted_in_debug_output() {
         let private = PrivateKey::from_bytes(PRIVATE);
-        let preshared: PresharedKey = PUBLIC_BASE64.parse().unwrap();
+        let preshared: PresharedKey = PEER_PUBLIC.parse().unwrap();
 
         assert_eq!(format!("{private:?}"), "PrivateKey(<redacted>)");
         assert_eq!(format!("{preshared:?}"), "PresharedKey(<redacted>)");
@@ -163,9 +163,9 @@ mod tests {
 
     #[test]
     fn preshared_key_round_trips_through_base64() {
-        let preshared: PresharedKey = PUBLIC_BASE64.parse().unwrap();
+        let preshared: PresharedKey = PEER_PUBLIC.parse().unwrap();
 
-        assert_eq!(preshared.to_base64().as_str(), PUBLIC_BASE64);
+        assert_eq!(preshared.to_base64().as_str(), PEER_PUBLIC);
     }
 
     #[test]

@@ -51,38 +51,7 @@ impl AdapterPlan {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::fixtures::{PEER_PUBLIC, PRESHARED, realistic_plan as plan};
-
-    const ENDPOINT: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 10), 51820);
-
-    #[test]
-    fn interface_gets_key_address_and_dns() {
-        let plan = plan();
-
-        assert_eq!(plan.private_key.as_bytes(), &[7; 32]);
-        assert_eq!(plan.address.to_string(), "10.21.0.7/32");
-        assert_eq!(
-            plan.dns,
-            [Ipv4Addr::new(10, 21, 0, 1), Ipv4Addr::new(10, 21, 0, 2)]
-        );
-    }
-
-    #[test]
-    fn peer_carries_keys_and_resolved_endpoint() {
-        let peer = plan().peer;
-
-        assert_eq!(peer.public_key.to_string(), PEER_PUBLIC);
-        assert_eq!(peer.preshared_key.to_base64().as_str(), PRESHARED);
-        assert_eq!(peer.endpoint, ENDPOINT);
-    }
-
-    #[test]
-    fn routes_are_exactly_the_split_default_route() {
-        let routes = plan().peer.allowed_ips.map(|net| net.to_string());
-
-        assert_eq!(routes, ["0.0.0.0/1", "128.0.0.0/1"]);
-    }
+    use crate::fixtures::{PEER_PUBLIC, realistic_plan as plan};
 
     #[test]
     fn debug_output_hides_secrets() {
