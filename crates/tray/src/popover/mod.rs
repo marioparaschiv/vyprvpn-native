@@ -292,8 +292,14 @@ impl Popover {
         }
     }
 
-    /// Fades the card out, then removes the window.
+    /// Fades the card out, then removes the window. On macOS the window closes at once instead,
+    /// and AppKit's own exit animation plays on the card as last drawn.
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if cfg!(target_os = "macos") {
+            window.remove_window();
+            return;
+        }
+
         if matches!(self.presence, Presence::Exiting { .. }) {
             return;
         }
@@ -803,11 +809,12 @@ mod tests {
         assert_eq!(page(&popover, cx), Page::Main);
         assert!(events.borrow().is_empty());
 
+        let exit = exit_duration(cx);
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(cx.windows().len(), 1, "the card fades out first");
 
-        let exit = exit_duration(cx);
         cx.executor().advance_clock(exit);
         cx.run_until_parked();
         assert!(cx.windows().is_empty());
@@ -820,8 +827,8 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(cx.windows().len(), 1);
 
-        cx.deactivate_window();
         let exit = exit_duration(cx);
+        cx.deactivate_window();
         cx.executor().advance_clock(exit);
         cx.run_until_parked();
 
