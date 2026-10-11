@@ -107,6 +107,10 @@ fn main() -> ExitCode {
         }
     };
 
+    if helper == Helper::Service {
+        install_helper_if_missing();
+    }
+
     let (observed, requests) = match helper_link::spawn(helper) {
         Ok(link) => link,
         Err(error) => {
@@ -151,6 +155,23 @@ fn helper(mut args: impl Iterator<Item = String>) -> Result<Helper, ArgsError> {
             pipe_name: ipc::console_socket_path().into_os_string(),
         }),
         _ => Err(ArgsError::Usage),
+    }
+}
+
+/// Blocks on the administrator prompt, so the tray icon only appears once it is answered.
+fn install_helper_if_missing() {
+    match service::installed() {
+        Ok(true) => return,
+        Ok(false) => log::info!("the helper is not installed; installing it"),
+        Err(error) => {
+            log::warn!("{error}");
+            return;
+        }
+    }
+
+    if let Err(error) = service::install() {
+        log::error!("{error}");
+        tray_menu::notify(&error.to_string());
     }
 }
 

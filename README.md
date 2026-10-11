@@ -62,12 +62,12 @@ How the DLL is fetched:
 
 ## Install (Windows)
 
-> **Needs an elevated prompt.** Run it as the user who will use VyprVPN.
-
-1. `xcopy /e /i dist "C:\Program Files\VyprVPN"`
-2. `cd /d "C:\Program Files\VyprVPN"`
-3. `vyprvpn-helper.exe install`
+1. From an elevated prompt: `xcopy /e /i dist "C:\Program Files\VyprVPN"`
+2. Start `C:\Program Files\VyprVPN\VyprVPN.exe` as the user who will use VyprVPN.
+3. Approve the UAC prompt. The tray app runs `vyprvpn-helper.exe install` for you whenever the service is missing.
 4. Optional: `vyprvpn-helper.exe shortcut` puts a VyprVPN shortcut on your desktop.
+
+To see why an install fails, run `vyprvpn-helper.exe install` yourself from an elevated prompt in that folder.
 
 > **Folder permission check:** install refuses any folder that anyone except SYSTEM, Administrators and TrustedInstaller can change. That includes `dist\` itself. It also refuses if anyone else could rename a folder above it.
 
@@ -88,11 +88,12 @@ At runtime:
 
 ## Install (macOS)
 
-> **Needs `sudo`.** Run it from your own account.
-
 1. `cargo xtask dist`
 2. Move `dist/VyprVPN.app` to `/Applications`.
-3. `sudo /Applications/VyprVPN.app/Contents/MacOS/vyprvpn-helper install`
+3. Open VyprVPN from your own account.
+4. Enter an administrator password when asked. The app runs `vyprvpn-helper install` for you whenever the helper is missing.
+
+The manual equivalent is `sudo /Applications/VyprVPN.app/Contents/MacOS/vyprvpn-helper install`.
 
 What install does:
 

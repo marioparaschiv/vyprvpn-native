@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 #[error("environment variable {0} is not set")]
-pub struct MissingEnv(&'static str);
+pub struct MissingEnv(pub &'static str);
 
 /// `%LOCALAPPDATA%\VyprVPN` on Windows, `~/Library/Caches/VyprVPN` on macOS.
 pub fn cache_dir() -> Result<PathBuf, MissingEnv> {
