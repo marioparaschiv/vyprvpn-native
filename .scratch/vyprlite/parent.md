@@ -13,7 +13,7 @@ Replace the official VyprVPN client (constant 5-10% CPU) with a minimal, low-idl
 
 Two processes:
 
-- **Tray app (Rust + GPUI)**: unprivileged. Native tray icon and right-click menu (`tray-icon` + `muda` crates); GPUI windows for login and the location popover. Holds no secrets and does no networking to Vypr.
+- **Tray app (Rust + GPUI)**: unprivileged. Native tray icon and right-click menu (`tray-icon` + `muda` crates); GPUI windows for login and the location popover, built with `gpui-kit` (https://gpui-kit.com, its components and theme) on GPUI Fast (its `gpui-fast` feature, https://github.com/longbridge/gpui-fast). Holds no secrets and does no networking to Vypr.
 - **Helper (Rust)**: privileged. On Windows a service running as SYSTEM (`windows-service` crate); on macOS a launchd daemon running as root. Owns all Vypr API calls, credential storage, WireGuard keys, and the tunnel. The helper owns the WireGuard adapter directly, so there is no separate tunnel service.
 
 They talk over a local IPC channel:
@@ -21,6 +21,14 @@ They talk over a local IPC channel:
 - Windows: named pipe. macOS: Unix domain socket.
 - Protocol: newline-delimited JSON. Requests from the tray app (e.g. status, locations, login, logout, connect, disconnect) get a response; the helper also pushes status events (connecting / connected / disconnected / error) to every connected client.
 - Access control: only SYSTEM/root and the user who installed VyprLite may connect. Do not open it to all local users, since the helper controls the network.
+
+### Helper lifecycle
+
+The helper runs only when needed. Nothing runs at boot.
+
+- Windows: the service is manual-start. Install grants the installing user start and query rights on the service, so the unelevated tray app starts it through the Service Control Manager when it launches or finds the helper gone. macOS: launchd socket activation needs unsafe code, so the daemon listens on its Unix socket itself and launchd starts it on demand (WatchPaths) when the tray touches an owner-only wake file created at install.
+- The helper exits by itself when no tray app is connected and no tunnel is up. While a tunnel is up it keeps running, even with the tray app closed.
+- Startup is fast: the helper listens on the IPC endpoint first; state reconciliation, API calls, and loading `wireguard.dll` happen lazily, after that or on first use.
 
 The helper is the single source of truth for state. The tray app renders whatever the helper reports and must cope with the helper restarting.
 
@@ -69,9 +77,11 @@ Tunnel config: `AllowedIPs = 0.0.0.0/1, 128.0.0.0/1` (split default route, as th
 - UI: native tray menu for right-click; GPUI only for windows (login, popover). No webview.
 - Left-click on the tray icon opens a GPUI popover anchored to the icon (below the menu-bar icon on macOS; beside the icon on the taskbar's edge on Windows).
 - The tray app runs unelevated; elevation happens once, at install, for the helper.
-- Credentials live in the helper, encrypted at rest (Windows: DPAPI user scope under SYSTEM, so only SYSTEM can decrypt, stored in the helper's data dir; macOS: System keychain or root-only file).
+- Credentials live in the helper, encrypted at rest (Windows: DPAPI user scope under SYSTEM, so only SYSTEM can decrypt, stored in the helper's data dir, which is LocalSystem's local app-data dir (`C:\Windows\System32\config\systemprofile\AppData\Local\VyprLite`). It inherits the system profile's SYSTEM+Administrators-only ACL, so no ACL code (and no unsafe) is needed; macOS: System keychain or root-only file).
 - Closing the tray app does not drop the VPN; the helper keeps the tunnel up.
 - Windows is built and verified first; macOS needs a Mac to build and test.
+- No unsafe code: `unsafe_code = "deny"` across the workspace, and OS calls go through maintained crates with safe APIs. The single exception is loading `wireguard.dll` (`wireguard_nt::load_from_path`, which has no safe form), one audited `#[expect(unsafe_code)]` in `crates/tunnel`. Where no safe crate exists, use `netsh` rather than more unsafe.
+- Current Rust standards: edition 2024, resolver 3, workspace-level dependencies and lints, latest stable crate versions.
 
 ## Glossary
 

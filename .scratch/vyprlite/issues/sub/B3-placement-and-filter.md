@@ -1,0 +1,9 @@
+# B3: `locations` and `placement` crates, pure logic (part of 05, 08)
+
+Owned: new `crates/locations/**`, new `crates/placement/**`, `crates/tray/src/locations.rs` (moved out), and the lines in `crates/tray/Cargo.toml` and `crates/tray/src/main.rs` that switch the tray to the new crate. Both crates are GUI-free and platform-neutral, so their tests build fast without GPUI.
+
+- `crates/locations`: move the Region → Country → City grouping from `crates/tray/src/locations.rs` here, with its test, unchanged in behaviour; the tray uses the crate and the old module is deleted. Add the filter: case-insensitive match on location name, country, country code, region or spoke_id, over the existing `Location` type, stable order.
+- `crates/placement`: one pure function taking the tray icon rect, the monitor bounds, the monitor work area, the popover size and the scale factor, returning the popover origin. Windows: next to the icon on the edge where the taskbar is (work area vs bounds tells which edge), kept inside the work area. macOS: directly below the menu-bar icon, horizontally centred on it, clamped to the screen. Physical vs logical pixels explicit in the types. No GPUI types; the tray converts at its edge.
+- Unused-until-integration items in the tray keep the existing `#[expect(dead_code, reason = "...")]` style.
+
+Verify: `cargo fmt --all --check`; `cargo clippy -p locations -p placement -p vyprlite-tray --all-targets -- -D warnings`; `cargo test -p locations -p placement`, with cases: taskbar bottom/top/left/right; icon near each screen corner (clamped); 100/125/150% scale; a secondary monitor with negative coordinates; the Windows 11 overflow flyout (icon rect not on the taskbar edge); macOS menu bar centred and clamped at the right edge; the moved grouping test; filter "perth", "GER", "de1" each matching exactly the expected location in the recorded locations fixture.

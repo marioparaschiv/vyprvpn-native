@@ -14,7 +14,7 @@ The selected location defaults to the last-used one (issue 06 persists it). Flag
 
 Visuals:
 
-- follows the OS light/dark mode
+- follows the OS light/dark mode and accent colour, switching live when they change (shared theme logic from issue 02/03)
 - rounded corners and a subtle shadow, consistent spacing
 - short page-slide and state transitions that respect reduced-motion
 - no native window chrome
