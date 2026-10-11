@@ -18,10 +18,10 @@ const INNER_RADIUS: i32 = OUTER_RADIUS - BORDER_WIDTH;
 const BORDER_SHADE_PERCENT: u32 = 72;
 
 const GREY: [u8; BYTES] = dot([0x9E, 0x9E, 0x9E]);
-const AMBER: [u8; BYTES] = dot([0xF2, 0xA9, 0x00]);
+const BLUE: [u8; BYTES] = dot([0x9C, 0xC7, 0xF2]);
 const GREEN: [u8; BYTES] = dot([0x8E, 0xE0, 0xA1]);
 
-/// Which tray icon shows: grey disconnected, amber busy, green connected.
+/// Which tray icon shows: grey disconnected, blue busy, green connected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconKind {
     Disconnected,
@@ -32,7 +32,7 @@ pub enum IconKind {
 pub fn icon(kind: IconKind) -> Result<Icon, BadIcon> {
     let rgba = match kind {
         IconKind::Disconnected => &GREY,
-        IconKind::Busy => &AMBER,
+        IconKind::Busy => &BLUE,
         IconKind::Connected => &GREEN,
     };
 
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn centre_is_the_opaque_fill() {
-        assert_eq!(pixel(&AMBER, SIZE / 2, SIZE / 2), [0xF2, 0xA9, 0x00, 0xFF]);
+        assert_eq!(pixel(&BLUE, SIZE / 2, SIZE / 2), [0x9C, 0xC7, 0xF2, 0xFF]);
         assert_eq!(
             pixel(&GREEN, SIZE / 2 - 1, SIZE / 2 - 1),
             [0x8E, 0xE0, 0xA1, 0xFF]
