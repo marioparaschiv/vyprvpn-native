@@ -70,7 +70,7 @@ mod tests {
     fn sets_the_first_server_and_appends_the_rest() {
         let commands = dns_commands(
             Path::new(NETSH),
-            "VyprLite",
+            "VyprVPN",
             &[Ipv4Addr::new(10, 21, 0, 1), Ipv4Addr::new(10, 21, 0, 2)],
         );
 
@@ -84,7 +84,7 @@ mod tests {
                         "ipv4",
                         "set",
                         "dnsservers",
-                        "name=VyprLite",
+                        "name=VyprVPN",
                         "source=static",
                         "address=10.21.0.1",
                         "register=none",
@@ -98,7 +98,7 @@ mod tests {
                         "ipv4",
                         "add",
                         "dnsservers",
-                        "name=VyprLite",
+                        "name=VyprVPN",
                         "address=10.21.0.2",
                         "index=2",
                         "validate=no",
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn no_servers_clears_the_static_ones() {
         assert_eq!(
-            dns_commands(Path::new(NETSH), "VyprLite", &[]),
+            dns_commands(Path::new(NETSH), "VyprVPN", &[]),
             [Invocation::new(
                 NETSH,
                 &[
@@ -119,7 +119,7 @@ mod tests {
                     "ipv4",
                     "set",
                     "dnsservers",
-                    "name=VyprLite",
+                    "name=VyprVPN",
                     "source=static",
                     "address=none",
                     "validate=no",

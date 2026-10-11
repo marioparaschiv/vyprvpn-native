@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-Installed as ~/Library/LaunchAgents/com.vyprlite.tray.plist for the installing user, so the tray app
+Installed as ~/Library/LaunchAgents/com.vyprvpn.tray.plist for the installing user, so the tray app
 starts when they log in.
 -->
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.vyprlite.tray</string>
+	<string>com.vyprvpn.tray</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/local/libexec/vyprlite/VyprLite</string>
+		<string>/usr/local/libexec/vyprvpn/VyprVPN</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

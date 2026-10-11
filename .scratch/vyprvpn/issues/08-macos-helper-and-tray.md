@@ -1,10 +1,10 @@
 ## Parent
 
-`../parent.md` (VyprLite: all-Rust GPUI tray app + privileged helper)
+`../parent.md` (VyprVPN: all-Rust GPUI tray app + privileged helper)
 
 ## What to build
 
-VyprLite on macOS, end to end. The helper runs as a root launchd daemon, uses userspace `boringtun` on a `utun` interface, and configures the interface address, routes (including keeping the WireGuard endpoint reachable outside the tunnel), and DNS itself, undoing all of it on disconnect. It serves the same IPC protocol over a Unix domain socket restricted to root and the installing user, and stores credentials per the parent **Decisions**. API calls send `X-GF-PLATFORM: Mac`.
+VyprVPN on macOS, end to end. The helper runs as a root launchd daemon, uses userspace `boringtun` on a `utun` interface, and configures the interface address, routes (including keeping the WireGuard endpoint reachable outside the tunnel), and DNS itself, undoing all of it on disconnect. It serves the same IPC protocol over a Unix domain socket restricted to root and the installing user, and stores credentials per the parent **Decisions**. API calls send `X-GF-PLATFORM: Mac`.
 
 The same Rust + GPUI tray app runs as a menu-bar item: native right-click menu, and the issue 05 popover anchored directly below the menu-bar icon, horizontally centred on it and clamped to the screen. This needs a Mac to build and verify; it is built locally and not notarized.
 

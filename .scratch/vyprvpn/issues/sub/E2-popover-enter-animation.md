@@ -9,4 +9,4 @@ Owned: the popover's open/close presentation in `crates/tray/src/popover/mod.rs`
 - Frames run only during the animation; idle CPU stays ~0%.
 - Pure, tested: the origin side as a function of the placement edge, and the progress curve values (start, end, monotonic, no overshoot past 1.0 opacity).
 
-Verify: `cargo fmt --all --check`; `cargo clippy -p vyprlite-tray --all-targets -- -D warnings`; `cargo test -p vyprlite-tray`. Commit as `feat(tray): ...`, no AI attribution. The user judges the feel by hand.
+Verify: `cargo fmt --all --check`; `cargo clippy -p vyprvpn-tray --all-targets -- -D warnings`; `cargo test -p vyprvpn-tray`. Commit as `feat(tray): ...`, no AI attribution. The user judges the feel by hand.

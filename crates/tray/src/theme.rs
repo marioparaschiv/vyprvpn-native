@@ -98,15 +98,15 @@ fn mode(cx: &App) -> ThemeMode {
     cx.window_appearance().into()
 }
 
-/// `VYPRLITE_THEME=light` or `dark` pins the mode in debug builds, for screenshots without touching
+/// `VYPRVPN_THEME=light` or `dark` pins the mode in debug builds, for screenshots without touching
 /// the OS setting.
 #[cfg(debug_assertions)]
 fn dev_override() -> Option<ThemeMode> {
-    match std::env::var("VYPRLITE_THEME").ok()?.as_str() {
+    match std::env::var("VYPRVPN_THEME").ok()?.as_str() {
         "light" => Some(ThemeMode::Light),
         "dark" => Some(ThemeMode::Dark),
         other => {
-            log::warn!("ignoring VYPRLITE_THEME={other:?}; use light or dark");
+            log::warn!("ignoring VYPRVPN_THEME={other:?}; use light or dark");
             None
         }
     }

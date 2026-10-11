@@ -25,7 +25,7 @@ Repo `C:\Users\eternal\vypr-native-client`, branch `feat/native-client`. Read `p
 ## Safety
 - Nothing elevated or system-changing: no installing or starting services, no adapters, routes, DNS, registry or firewall changes, no `sudo`.
 - Never send input to the desktop. Never capture the screen or a screen region. If your sub-issue asks for screenshots, capture only your own window by its handle (e.g. `PrintWindow`) and check the image before keeping it.
-- No live API calls that need the user's credentials. The user's stored login in `%LOCALAPPDATA%\VyprLite\credentials.bin` must not be read, decrypted, used or deleted. Run dev processes against a throwaway data dir.
+- No live API calls that need the user's credentials. The user's stored login in `%LOCALAPPDATA%\VyprVPN\credentials.bin` must not be read, decrypted, used or deleted. Run dev processes against a throwaway data dir.
 - Tests deterministic: no real sleeps, use paused or fake clocks; mock HTTP with a local server.
 - Never use `sleep` to wait in your shell. Kill every process you start.
 - Don't commit.

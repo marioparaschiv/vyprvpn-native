@@ -1,5 +1,5 @@
 [package]
-name = "vyprlite-helper"
+name = "vyprvpn-helper"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

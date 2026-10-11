@@ -33,13 +33,13 @@ const NOT_SERVED: &[io::ErrorKind] = &[io::ErrorKind::NotFound, io::ErrorKind::C
 pub enum Helper {
     /// The installed helper, which the tray app starts whenever it is not running.
     Service,
-    /// A helper started by hand with `vyprlite-helper --console`, running as `user_sid`.
+    /// A helper started by hand with `vyprvpn-helper --console`, running as `user_sid`.
     #[cfg(windows)]
     Console {
         pipe_name: OsString,
         user_sid: String,
     },
-    /// A helper started by hand with `vyprlite-helper --console`, running as this user.
+    /// A helper started by hand with `vyprvpn-helper --console`, running as this user.
     #[cfg(target_os = "macos")]
     Console { pipe_name: OsString },
 }
@@ -556,14 +556,14 @@ mod tests {
 
     #[cfg(windows)]
     fn pipe_name(test: &str) -> String {
-        format!(r"\\.\pipe\vyprlite-tray-test-{test}-{}", std::process::id())
+        format!(r"\\.\pipe\vyprvpn-tray-test-{test}-{}", std::process::id())
     }
 
     #[cfg(target_os = "macos")]
     fn pipe_name(test: &str) -> String {
         std::env::temp_dir()
             .join(format!(
-                "vyprlite-tray-test-{test}-{}.sock",
+                "vyprvpn-tray-test-{test}-{}.sock",
                 std::process::id()
             ))
             .into_os_string()

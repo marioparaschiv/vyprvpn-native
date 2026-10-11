@@ -1,5 +1,5 @@
 #[cfg(not(any(windows, target_os = "macos")))]
-compile_error!("vyprlite-helper supports only Windows and macOS");
+compile_error!("vyprvpn-helper supports only Windows and macOS");
 
 mod connection;
 mod crash_log;

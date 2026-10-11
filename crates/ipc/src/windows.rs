@@ -3,14 +3,14 @@ use std::io;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 /// The manual-start service the tray app starts on demand.
-pub const SERVICE_NAME: &str = "VyprLiteHelper";
-pub const SERVICE_PIPE_NAME: &str = r"\\.\pipe\vyprlite";
-/// Names the tray app's notifications; install registers it so Windows shows "VyprLite" as their source.
-pub const APP_USER_MODEL_ID: &str = "VyprLite";
+pub const SERVICE_NAME: &str = "VyprVPNHelper";
+pub const SERVICE_PIPE_NAME: &str = r"\\.\pipe\vyprvpn";
+/// Names the tray app's notifications; install registers it so Windows shows "VyprVPN" as their source.
+pub const APP_USER_MODEL_ID: &str = "VyprVPN";
 
 /// The pipe a `--console` helper serves on, scoped to the user so it never collides with the service.
 pub fn console_pipe_name(user_sid: &str) -> String {
-    format!(r"\\.\pipe\vyprlite-console-{user_sid}")
+    format!(r"\\.\pipe\vyprvpn-console-{user_sid}")
 }
 
 /// The string SID (`S-1-5-21-...`) of the user this process runs as.

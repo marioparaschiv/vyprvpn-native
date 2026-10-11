@@ -12,4 +12,4 @@ Add exactly this shape (Rust names follow the existing style; the wire format be
 - Update every existing use of `Status::Disconnected` in helper and tray to the new fields with the minimum edit (`last_spoke_id: None, error: None`); that edit in those files is allowed.
 - Document all of it in `docs/ipc-protocol.md`.
 
-Verify (all pass): `cargo fmt --all --check`; `cargo clippy -p ipc -p vyprlite-helper -p vyprlite-tray --all-targets -- -D warnings`; `cargo test -p ipc` with a wire-format test for every new message (exact JSON strings above).
+Verify (all pass): `cargo fmt --all --check`; `cargo clippy -p ipc -p vyprvpn-helper -p vyprvpn-tray --all-targets -- -D warnings`; `cargo test -p ipc` with a wire-format test for every new message (exact JSON strings above).

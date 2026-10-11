@@ -33,14 +33,14 @@ const WRITE_RIGHTS: u32 = FILE_WRITE_DATA
 const REPLACE_RIGHTS: u32 = DELETE | FILE_DELETE_CHILD | WRITE_DAC | WRITE_OWNER | GENERIC_ALL;
 
 const INHERIT_ONLY: u32 = 2;
-const PATHS_VAR: &str = "VYPRLITE_ACL_PATHS";
+const PATHS_VAR: &str = "VYPRVPN_ACL_PATHS";
 
 /// Prints `owner <SID>` per path, then `ace <SID> <rights hex> <0 allow|1 deny> <propagation flags>`
 /// per ACE. SIDs instead of account names, which are localized. Plain .NET instead of `Get-Acl`,
 /// whose module fails to load when a PowerShell 7 prompt leaks its `PSModulePath`.
 const ACL_SCRIPT: &str = r#"$ErrorActionPreference = 'Stop'
 $sid = [System.Security.Principal.SecurityIdentifier]
-foreach ($path in $env:VYPRLITE_ACL_PATHS.Split("`n")) {
+foreach ($path in $env:VYPRVPN_ACL_PATHS.Split("`n")) {
     if ([System.IO.Directory]::Exists($path)) { $item = [System.IO.DirectoryInfo]::new($path) } else { $item = [System.IO.FileInfo]::new($path) }
     $acl = $item.GetAccessControl()
     'owner ' + $acl.GetOwner($sid).Value
@@ -58,7 +58,7 @@ pub enum InstallDirError {
     #[error("unexpected output reading the install folder's permissions: {0:?}")]
     Output(String),
     #[error(
-        "refusing to install: {} {exposure}. The helper runs as SYSTEM, so its folder must be writable only by administrators: from an elevated prompt, copy dist\\ to C:\\Program Files\\VyprLite and run install from there",
+        "refusing to install: {} {exposure}. The helper runs as SYSTEM, so its folder must be writable only by administrators: from an elevated prompt, copy dist\\ to C:\\Program Files\\VyprVPN and run install from there",
         path.display()
     )]
     Unprotected { path: PathBuf, exposure: Exposure },
@@ -442,17 +442,17 @@ ace S-1-5-21-1309070409-676813193-2614181977-1002 001F01FF 0 0
     fn checks_the_folder_and_files_for_writes_and_every_ancestor_for_renames() {
         assert_eq!(
             targets(
-                Path::new(r"C:\Program Files\VyprLite"),
-                &["vyprlite-helper.exe", "wireguard.dll"]
+                Path::new(r"C:\Program Files\VyprVPN"),
+                &["vyprvpn-helper.exe", "wireguard.dll"]
             ),
             [
-                (PathBuf::from(r"C:\Program Files\VyprLite"), WRITE_RIGHTS),
+                (PathBuf::from(r"C:\Program Files\VyprVPN"), WRITE_RIGHTS),
                 (
-                    PathBuf::from(r"C:\Program Files\VyprLite\vyprlite-helper.exe"),
+                    PathBuf::from(r"C:\Program Files\VyprVPN\vyprvpn-helper.exe"),
                     WRITE_RIGHTS
                 ),
                 (
-                    PathBuf::from(r"C:\Program Files\VyprLite\wireguard.dll"),
+                    PathBuf::from(r"C:\Program Files\VyprVPN\wireguard.dll"),
                     WRITE_RIGHTS
                 ),
                 (PathBuf::from(r"C:\Program Files"), REPLACE_RIGHTS),
@@ -478,10 +478,10 @@ ace S-1-5-21-1309070409-676813193-2614181977-1002 001F01FF 0 0
     #[test]
     fn refuses_a_folder_the_current_user_created() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("vyprlite-helper.exe"), b"").unwrap();
+        std::fs::write(dir.path().join("vyprvpn-helper.exe"), b"").unwrap();
 
         assert!(matches!(
-            check(&system_root(), dir.path(), &["vyprlite-helper.exe"]),
+            check(&system_root(), dir.path(), &["vyprvpn-helper.exe"]),
             Err(InstallDirError::Unprotected { path, .. }) if path == dir.path()
         ));
     }

@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(not(any(windows, target_os = "macos")))]
-compile_error!("the VyprLite tray app supports only Windows and macOS");
+compile_error!("the VyprVPN tray app supports only Windows and macOS");
 
 mod flags;
 mod helper_link;
@@ -36,7 +36,7 @@ use tray_menu::{MenuAction, TrayError, TrayMenu};
 
 #[derive(Debug, thiserror::Error)]
 enum ArgsError {
-    #[error("usage: VyprLite [--console]")]
+    #[error("usage: VyprVPN [--console]")]
     Usage,
     #[cfg(windows)]
     #[error("finding the console pipe failed: {0}")]
@@ -81,7 +81,7 @@ fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     #[cfg(debug_assertions)]
-    if let Ok(page) = std::env::var("VYPRLITE_DEV_POPOVER") {
+    if let Ok(page) = std::env::var("VYPRVPN_DEV_POPOVER") {
         return popover::dev::run(&page);
     }
 
@@ -120,7 +120,7 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `--console` talks to a helper started with `vyprlite-helper --console` instead of the service.
+/// `--console` talks to a helper started with `vyprvpn-helper --console` instead of the service.
 fn helper(mut args: impl Iterator<Item = String>) -> Result<Helper, ArgsError> {
     match (args.next().as_deref(), args.next()) {
         (None, _) => Ok(Helper::Service),

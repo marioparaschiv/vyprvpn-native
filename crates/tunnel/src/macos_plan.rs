@@ -184,7 +184,7 @@ pub(crate) fn networksetup_failed(output: &str) -> bool {
         .any(|line| line.trim_start().starts_with("** Error"))
 }
 
-/// A service's DNS servers before VyprLite replaced them. No servers means the service had none
+/// A service's DNS servers before VyprVPN replaced them. No servers means the service had none
 /// of its own and used the ones from DHCP.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SavedDns {

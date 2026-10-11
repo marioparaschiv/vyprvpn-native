@@ -33,13 +33,13 @@ enum Command {
 enum Mode {
     /// Foreground, unelevated, on a pipe only the current user can reach.
     Console,
-    /// Started by the service control manager; `owner` is the user who installed VyprLite.
+    /// Started by the service control manager; `owner` is the user who installed VyprVPN.
     Service { owner: Sid },
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum HelperError {
-    #[error("usage: vyprlite-helper install | uninstall | --console | --service --owner-sid <SID>")]
+    #[error("usage: vyprvpn-helper install | uninstall | --console | --service --owner-sid <SID>")]
     Usage,
     #[error(transparent)]
     InvalidSid(#[from] InvalidSid),
@@ -101,7 +101,7 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Help
 fn data_dir() -> Result<PathBuf, HelperError> {
     let path =
         PathBuf::from(env::var_os("LOCALAPPDATA").ok_or(HelperError::MissingEnv("LOCALAPPDATA"))?)
-            .join("VyprLite");
+            .join("VyprVPN");
 
     fs::create_dir_all(&path).map_err(|source| HelperError::DataDir {
         path: path.clone(),
@@ -169,7 +169,7 @@ mod tests {
 
     fn test_pipe_name(test: &str) -> String {
         format!(
-            r"\\.\pipe\vyprlite-helper-test-{test}-{}",
+            r"\\.\pipe\vyprvpn-helper-test-{test}-{}",
             std::process::id()
         )
     }

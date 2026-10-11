@@ -9,4 +9,4 @@ Owned: `crates/tray/src/tray_menu.rs`, `crates/tray/src/helper_link.rs`, new `cr
 - Expose the selected location and a `connect(spoke_id)` / `disconnect()` API on the helper link, so the popover (D1) reuses the same path.
 - Pure, unit-tested mapping: `Status` + locations + account -> menu labels, enabled states, icon kind, tooltip, notification.
 
-Verify: `cargo fmt --all --check`; `cargo clippy -p vyprlite-tray --all-targets -- -D warnings`; `cargo test -p vyprlite-tray` with the mapping cases for every status, logged out, and a missing location name. Idle CPU ~0% (measure against the console helper with fakes, report).
+Verify: `cargo fmt --all --check`; `cargo clippy -p vyprvpn-tray --all-targets -- -D warnings`; `cargo test -p vyprvpn-tray` with the mapping cases for every status, logged out, and a missing location name. Idle CPU ~0% (measure against the console helper with fakes, report).

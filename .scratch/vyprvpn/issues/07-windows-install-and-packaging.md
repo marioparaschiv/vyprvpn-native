@@ -1,6 +1,6 @@
 ## Parent
 
-`../parent.md` (VyprLite: all-Rust GPUI tray app + privileged helper)
+`../parent.md` (VyprVPN: all-Rust GPUI tray app + privileged helper)
 
 ## What to build
 

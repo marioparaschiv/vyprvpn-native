@@ -22,15 +22,15 @@ use super::install_dir::{self, InstallDirError};
 use super::security::{CurrentSidError, Sid};
 use crate::disconnect::{DisconnectError, disconnect_blocking};
 
-const SERVICE_DISPLAY_NAME: &str = "VyprLite Helper";
-const HELPER_EXE: &str = "vyprlite-helper.exe";
+const SERVICE_DISPLAY_NAME: &str = "VyprVPN Helper";
+const HELPER_EXE: &str = "vyprvpn-helper.exe";
 /// The tunnel loads it from the helper's folder.
 const WIREGUARD_DLL: &str = "wireguard.dll";
-const TRAY_EXE: &str = "VyprLite.exe";
+const TRAY_EXE: &str = "VyprVPN.exe";
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-const AUTOSTART_VALUE: &str = "VyprLite";
+const AUTOSTART_VALUE: &str = "VyprVPN";
 const APP_ID_KEYS: &str = r"Software\Classes\AppUserModelId";
-const APP_DISPLAY_NAME: &str = "VyprLite";
+const APP_DISPLAY_NAME: &str = "VyprVPN";
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -97,7 +97,7 @@ enum Step {
     SetAutostart {
         command: String,
     },
-    /// Lets the tray app's notifications show VyprLite, not the process that launched it, as source.
+    /// Lets the tray app's notifications show VyprVPN, not the process that launched it, as source.
     RegisterAppId {
         key: String,
         display_name: &'static str,
@@ -197,7 +197,7 @@ pub fn install() -> Result<(), InstallError> {
 
     let plan = install_plan(&exe_dir, &owner, find_service(&manager)?);
     execute(&manager, &plan)?;
-    println!("VyprLite is installed and starts at your next login.");
+    println!("VyprVPN is installed and starts at your next login.");
 
     Ok(())
 }
@@ -218,7 +218,7 @@ pub fn uninstall() -> Result<(), InstallError> {
     };
 
     execute(&manager, &uninstall_plan(&data_dir, found))?;
-    println!("VyprLite is uninstalled.");
+    println!("VyprVPN is uninstalled.");
 
     Ok(())
 }
@@ -245,9 +245,9 @@ fn system_root() -> Result<PathBuf, InstallError> {
         .ok_or(InstallError::MissingSystemRoot)
 }
 
-/// LocalSystem's `%LOCALAPPDATA%\VyprLite`, where the service keeps its log and credentials.
+/// LocalSystem's `%LOCALAPPDATA%\VyprVPN`, where the service keeps its log and credentials.
 fn service_data_dir() -> Result<PathBuf, InstallError> {
-    Ok(system_root()?.join(r"System32\config\systemprofile\AppData\Local\VyprLite"))
+    Ok(system_root()?.join(r"System32\config\systemprofile\AppData\Local\VyprVPN"))
 }
 
 fn find_service(manager: &ServiceManager) -> Result<HelperService, InstallError> {
@@ -460,7 +460,7 @@ mod tests {
     #[test]
     fn install_registers_the_service_sets_its_security_and_autostarts_the_tray() {
         let plan = install_plan(
-            Path::new(r"C:\Program Files\VyprLite"),
+            Path::new(r"C:\Program Files\VyprVPN"),
             &owner(),
             HelperService::Absent,
         );
@@ -469,7 +469,7 @@ mod tests {
             plan,
             [
                 Step::CreateService(ServiceConfig {
-                    executable: PathBuf::from(r"C:\Program Files\VyprLite\vyprlite-helper.exe"),
+                    executable: PathBuf::from(r"C:\Program Files\VyprVPN\vyprvpn-helper.exe"),
                     arguments: ["--service", "--owner-sid", OWNER]
                         .map(OsString::from)
                         .into(),
@@ -480,11 +480,11 @@ mod tests {
                     ),
                 },
                 Step::SetAutostart {
-                    command: r#""C:\Program Files\VyprLite\VyprLite.exe""#.into(),
+                    command: r#""C:\Program Files\VyprVPN\VyprVPN.exe""#.into(),
                 },
                 Step::RegisterAppId {
-                    key: r"Software\Classes\AppUserModelId\VyprLite".into(),
-                    display_name: "VyprLite",
+                    key: r"Software\Classes\AppUserModelId\VyprVPN".into(),
+                    display_name: "VyprVPN",
                 },
             ]
         );
@@ -493,12 +493,12 @@ mod tests {
     #[test]
     fn install_updates_an_existing_service_in_place() {
         for service in [HelperService::Stopped, HelperService::Running] {
-            let plan = install_plan(Path::new(r"D:\VyprLite"), &owner(), service);
+            let plan = install_plan(Path::new(r"D:\VyprVPN"), &owner(), service);
 
             assert_eq!(
                 plan[0],
                 Step::UpdateService(ServiceConfig {
-                    executable: PathBuf::from(r"D:\VyprLite\vyprlite-helper.exe"),
+                    executable: PathBuf::from(r"D:\VyprVPN\vyprvpn-helper.exe"),
                     arguments: ["--service", "--owner-sid", OWNER]
                         .map(OsString::from)
                         .into(),
@@ -507,15 +507,14 @@ mod tests {
             );
             assert_eq!(
                 plan[1..],
-                install_plan(Path::new(r"D:\VyprLite"), &owner(), HelperService::Absent)[1..]
+                install_plan(Path::new(r"D:\VyprVPN"), &owner(), HelperService::Absent)[1..]
             );
         }
     }
 
     #[test]
     fn uninstall_disconnects_a_running_helper_and_removes_everything() {
-        let data_dir =
-            Path::new(r"C:\Windows\System32\config\systemprofile\AppData\Local\VyprLite");
+        let data_dir = Path::new(r"C:\Windows\System32\config\systemprofile\AppData\Local\VyprVPN");
 
         assert_eq!(
             uninstall_plan(data_dir, found(HelperService::Running, true, true, true)),
@@ -524,7 +523,7 @@ mod tests {
                 Step::RemoveService,
                 Step::DeleteAutostart,
                 Step::DeleteAppId {
-                    key: r"Software\Classes\AppUserModelId\VyprLite".into(),
+                    key: r"Software\Classes\AppUserModelId\VyprVPN".into(),
                 },
                 Step::DeleteDataDir(data_dir.to_owned()),
             ]

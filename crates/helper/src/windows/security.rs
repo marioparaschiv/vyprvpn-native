@@ -51,7 +51,7 @@ impl fmt::Display for Sid {
     }
 }
 
-/// SYSTEM serves the pipe; the owner, the user who installed VyprLite, connects to it.
+/// SYSTEM serves the pipe; the owner, the user who installed VyprVPN, connects to it.
 pub fn pipe_security(owner: &Sid) -> io::Result<SecurityDescriptor> {
     let sddl = U16CString::from_str(format!("D:P(A;;GA;;;SY)(A;;GRGW;;;{owner})"))
         .map_err(io::Error::other)?;

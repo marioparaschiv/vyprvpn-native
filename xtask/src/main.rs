@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus};
 
-const BINARIES: [&str; 2] = ["VyprLite.exe", "vyprlite-helper.exe"];
+const BINARIES: [&str; 2] = ["VyprVPN.exe", "vyprvpn-helper.exe"];
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -110,8 +110,8 @@ fn build_release(root: &Path, target_dir: &Path) -> Result<(), Error> {
     let status = Command::new(cargo)
         .current_dir(root)
         .env("CARGO_TARGET_DIR", target_dir)
-        .args(["build", "--release", "--package", "vyprlite-tray"])
-        .args(["--package", "vyprlite-helper"])
+        .args(["build", "--release", "--package", "vyprvpn-tray"])
+        .args(["--package", "vyprvpn-helper"])
         .status()
         .map_err(|source| Error::Spawn {
             program: "cargo",

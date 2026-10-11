@@ -123,10 +123,10 @@ impl TrayMenu {
     }
 }
 
-/// Shows `message` as a desktop notification from VyprLite.
+/// Shows `message` as a desktop notification from VyprVPN.
 pub fn notify(message: &str) {
     let mut notification = Notification::new();
-    notification.summary("VyprLite").body(message);
+    notification.summary("VyprVPN").body(message);
     #[cfg(windows)]
     notification.app_id(ipc::APP_USER_MODEL_ID);
 
@@ -162,7 +162,7 @@ impl MenuView {
         let status_label = status_label(&state.helper, &state.locations);
 
         Self {
-            tooltip: format!("VyprLite\n{status_label}"),
+            tooltip: format!("VyprVPN\n{status_label}"),
             status: status_label,
             icon: match status {
                 Some(Status::Connected { .. }) => IconKind::Connected,
@@ -311,7 +311,7 @@ mod tests {
             MenuView::new(&running(disconnected(None))),
             MenuView {
                 status: "Disconnected".into(),
-                tooltip: "VyprLite\nDisconnected".into(),
+                tooltip: "VyprVPN\nDisconnected".into(),
                 icon: IconKind::Disconnected,
                 connect_label: "Connect to Australia - Perth".into(),
                 connect_to: Some("au3".into()),
@@ -327,7 +327,7 @@ mod tests {
         let view = MenuView::new(&running(connecting()));
 
         assert_eq!(view.status, "Connecting to Germany…");
-        assert_eq!(view.tooltip, "VyprLite\nConnecting to Germany…");
+        assert_eq!(view.tooltip, "VyprVPN\nConnecting to Germany…");
         assert_eq!(view.icon, IconKind::Busy);
         assert_eq!(view.connect_label, "Connect to Germany");
         assert_eq!(view.connect_to, None);
@@ -339,7 +339,7 @@ mod tests {
         let view = MenuView::new(&running(connected()));
 
         assert_eq!(view.status, "Connected: Germany");
-        assert_eq!(view.tooltip, "VyprLite\nConnected: Germany");
+        assert_eq!(view.tooltip, "VyprVPN\nConnected: Germany");
         assert_eq!(view.icon, IconKind::Connected);
         assert_eq!(view.connect_label, "Connect to Germany");
         assert_eq!(view.connect_to, None);
@@ -436,7 +436,7 @@ mod tests {
             MenuView::new(&LinkState::default()),
             MenuView {
                 status: "Helper not running".into(),
-                tooltip: "VyprLite\nHelper not running".into(),
+                tooltip: "VyprVPN\nHelper not running".into(),
                 icon: IconKind::Disconnected,
                 connect_label: "Connect".into(),
                 connect_to: None,

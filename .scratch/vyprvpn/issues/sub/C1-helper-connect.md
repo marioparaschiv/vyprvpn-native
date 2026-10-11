@@ -10,4 +10,4 @@ Owned: `crates/helper/src/` except `windows/install.rs` (B4) and `macos/**` (B5)
 - Lifecycle: the helper keeps running while a tunnel is up, even with no client (parent "Helper lifecycle").
 - Model connect/disconnect as a state machine over traits for the API and the tunnel, so it's tested with fakes: success, API failure, tunnel failure after a session was created (session deleted), switch, disconnect while connecting, logout while connected.
 
-Verify: `cargo fmt --all --check`; `cargo clippy -p vyprlite-helper --all-targets -- -D warnings`; `cargo test -p vyprlite-helper` with the state-machine cases above and a protocol-level test over the real pipe in console mode using fakes (no real tunnel, no live API).
+Verify: `cargo fmt --all --check`; `cargo clippy -p vyprvpn-helper --all-targets -- -D warnings`; `cargo test -p vyprvpn-helper` with the state-machine cases above and a protocol-level test over the real pipe in console mode using fakes (no real tunnel, no live API).

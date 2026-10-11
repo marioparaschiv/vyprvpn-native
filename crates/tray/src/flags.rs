@@ -68,9 +68,9 @@ async fn cache_all(country_codes: BTreeSet<String>) {
     }
 }
 
-/// `%LOCALAPPDATA%\VyprLite\flags` on Windows, `~/Library/Caches/VyprLite/flags` on macOS.
+/// `%LOCALAPPDATA%\VyprVPN\flags` on Windows, `~/Library/Caches/VyprVPN/flags` on macOS.
 pub fn cache_dir() -> Result<PathBuf, FlagError> {
-    let path = caches_root()?.join("VyprLite").join("flags");
+    let path = caches_root()?.join("VyprVPN").join("flags");
 
     fs::create_dir_all(&path).map_err(|source| FlagError::Cache {
         path: path.clone(),

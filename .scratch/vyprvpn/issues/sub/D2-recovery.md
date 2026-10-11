@@ -10,5 +10,5 @@ Owned: `crates/helper/src/` recovery code (a new `recovery.rs` plus its call sit
 - `last_spoke_id` survives restarts.
 - The tray already reconnects to a restarted helper with backoff (ticket 01); confirm it re-renders the recovered state, no change expected.
 
-Verify: `cargo fmt --all --check`; `cargo clippy -p vyprlite-helper --all-targets -- -D warnings`; `cargo test -p vyprlite-helper recovery` with fakes for each case: no session; session without tunnel (deleted, cleared, disconnected); session with tunnel; delete fails then succeeds on retry (paused clock); corrupt record (reported, cleared, disconnected).
+Verify: `cargo fmt --all --check`; `cargo clippy -p vyprvpn-helper --all-targets -- -D warnings`; `cargo test -p vyprvpn-helper recovery` with fakes for each case: no session; session without tunnel (deleted, cleared, disconnected); session with tunnel; delete fails then succeeds on retry (paused clock); corrupt record (reported, cleared, disconnected).
 - Persisted shape (from C1): `crates/helper/src/session_store.rs` `Saved { last_spoke_id, session, pending_deletions }`, `SessionStore::load()`. On macOS b5's `serve` already replays a stored teardown at startup; move that call into recovery if it fits, without changing its behaviour.

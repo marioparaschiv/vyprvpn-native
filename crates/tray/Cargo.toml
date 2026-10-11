@@ -1,12 +1,12 @@
 [package]
-name = "vyprlite-tray"
+name = "vyprvpn-tray"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "VyprLite"
+name = "VyprVPN"
 path = "src/main.rs"
 
 [dependencies]

@@ -22,7 +22,7 @@ use crate::{init_logging, server};
 use boringtun::Boringtun;
 pub use credential_store::{CREDENTIALS_FILE, SealError, seal, unseal, write_private};
 
-const DAEMON_DATA_DIR: &str = "/Library/Application Support/VyprLite";
+const DAEMON_DATA_DIR: &str = "/Library/Application Support/VyprVPN";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Command {
@@ -35,13 +35,13 @@ enum Command {
 enum Mode {
     /// Foreground, as the current user, on a socket in their private temporary directory.
     Console,
-    /// Started by launchd as root; `owner` is the uid of the user who installed VyprLite.
+    /// Started by launchd as root; `owner` is the uid of the user who installed VyprVPN.
     Daemon { owner: u32 },
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum HelperError {
-    #[error("usage: vyprlite-helper install | uninstall | --console | --daemon --owner-uid <UID>")]
+    #[error("usage: vyprvpn-helper install | uninstall | --console | --daemon --owner-uid <UID>")]
     Usage,
     #[error("the owner uid is not a number: {0}")]
     InvalidUid(#[from] ParseIntError),
@@ -117,7 +117,7 @@ fn data_dir(mode: &Mode) -> Result<PathBuf, HelperError> {
     let path = match mode {
         Mode::Daemon { .. } => PathBuf::from(DAEMON_DATA_DIR),
         Mode::Console => PathBuf::from(env::var_os("HOME").ok_or(HelperError::MissingEnv("HOME"))?)
-            .join("Library/Application Support/VyprLite"),
+            .join("Library/Application Support/VyprVPN"),
     };
 
     DirBuilder::new()

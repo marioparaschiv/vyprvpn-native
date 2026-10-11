@@ -1,6 +1,6 @@
 ## Parent
 
-`../parent.md` (VyprLite: all-Rust GPUI tray app + privileged helper)
+`../parent.md` (VyprVPN: all-Rust GPUI tray app + privileged helper)
 
 ## What to build
 
@@ -8,7 +8,7 @@ The thinnest end-to-end path through the new architecture on Windows. The Rust h
 
 The helper runs only when needed (see parent **Helper lifecycle**): the tray app starts the manual-start service through the Service Control Manager when it launches or finds the helper gone, and the helper exits by itself once no tray app is connected and no tunnel is up. Startup is fast: the helper accepts IPC connections before doing any other work.
 
-Set up the Cargo workspace: `crates/vypr-api` (Vypr HTTP client), `crates/ipc` (protocol types shared by both halves), `crates/tunnel` (WireGuard keys, config model, OS backend), `helper/` (binary `vyprlite-helper`) and `tray/` (binary `VyprLite`). One `cargo build --workspace` builds both halves. The helper also runs in a `--console` foreground mode for unelevated development and testing.
+Set up the Cargo workspace: `crates/vypr-api` (Vypr HTTP client), `crates/ipc` (protocol types shared by both halves), `crates/tunnel` (WireGuard keys, config model, OS backend), `helper/` (binary `vyprvpn-helper`) and `tray/` (binary `VyprVPN`). One `cargo build --workspace` builds both halves. The helper also runs in a `--console` foreground mode for unelevated development and testing.
 
 ## Acceptance criteria
 

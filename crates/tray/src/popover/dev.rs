@@ -1,4 +1,4 @@
-//! `VYPRLITE_DEV_POPOVER=disconnected|connecting|connected|error|subpage` opens the popover on
+//! `VYPRVPN_DEV_POPOVER=disconnected|connecting|connected|error|subpage` opens the popover on
 //! made-up state in debug builds, for screenshots and trying it out without a helper.
 
 use std::cell::Cell;
@@ -16,9 +16,7 @@ use crate::theme;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DevError {
-    #[error(
-        "VYPRLITE_DEV_POPOVER={0:?}; use disconnected, connecting, connected, error or subpage"
-    )]
+    #[error("VYPRVPN_DEV_POPOVER={0:?}; use disconnected, connecting, connected, error or subpage")]
     Page(String),
     #[error("the bundled locations fixture is malformed: {0}")]
     Fixture(#[from] ipc::CodecError),

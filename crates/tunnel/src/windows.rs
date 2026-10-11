@@ -12,7 +12,7 @@ use crate::plan::AdapterPlan;
 
 const DLL_NAME: &str = "wireguard.dll";
 /// Names both the adapter and its wireguard-nt pool.
-const ADAPTER_NAME: &str = "VyprLite";
+const ADAPTER_NAME: &str = "VyprVPN";
 /// A stable GUID lets Windows reuse one network profile instead of creating a new one per connect.
 const ADAPTER_GUID: u128 = 0x5f1e_6c3a_9b2d_4e71_8a40_c7d3_19b8_e26f;
 

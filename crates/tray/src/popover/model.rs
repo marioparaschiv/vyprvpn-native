@@ -100,7 +100,7 @@ pub fn headline(state: &LinkState) -> Headline {
             return headline(
                 Tone::Failed,
                 "Helper not running",
-                "Waiting for the VyprLite helper.".to_owned(),
+                "Waiting for the VyprVPN helper.".to_owned(),
             );
         }
         HelperState::StartFailed(reason) => {
@@ -426,7 +426,7 @@ pub(super) mod tests {
         );
         assert_eq!(
             headline(&not_running).detail,
-            Detail::Text("Waiting for the VyprLite helper.".into())
+            Detail::Text("Waiting for the VyprVPN helper.".into())
         );
         assert_eq!(
             headline(&start_failed),

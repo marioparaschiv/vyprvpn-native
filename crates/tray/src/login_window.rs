@@ -159,11 +159,11 @@ impl Render for LoginWindow {
     }
 }
 
-/// `VYPRLITE_DEV_LOGIN_ERROR=<text>` opens the window showing that error in debug builds, for
+/// `VYPRVPN_DEV_LOGIN_ERROR=<text>` opens the window showing that error in debug builds, for
 /// screenshots without a failed login.
 fn dev_error() -> Option<SharedString> {
     #[cfg(debug_assertions)]
-    return std::env::var("VYPRLITE_DEV_LOGIN_ERROR")
+    return std::env::var("VYPRVPN_DEV_LOGIN_ERROR")
         .ok()
         .map(Into::into);
 

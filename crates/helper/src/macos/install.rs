@@ -10,14 +10,14 @@ use std::process::{Command, Output};
 use super::DAEMON_DATA_DIR;
 use crate::disconnect::{DisconnectError, disconnect_blocking};
 
-const HELPER_PATH: &str = "/Library/PrivilegedHelperTools/com.vyprlite.helper";
-const TRAY_DIR: &str = "/usr/local/libexec/vyprlite";
-const TRAY_PATH: &str = "/usr/local/libexec/vyprlite/VyprLite";
-const DAEMON_LABEL: &str = "com.vyprlite.helper";
-const DAEMON_PLIST_PATH: &str = "/Library/LaunchDaemons/com.vyprlite.helper.plist";
-const AGENT_PLIST: &str = "Library/LaunchAgents/com.vyprlite.tray.plist";
-const DAEMON_PLIST: &str = include_str!("../../macos/com.vyprlite.helper.plist");
-const AGENT_PLIST_TEXT: &str = include_str!("../../macos/com.vyprlite.tray.plist");
+const HELPER_PATH: &str = "/Library/PrivilegedHelperTools/com.vyprvpn.helper";
+const TRAY_DIR: &str = "/usr/local/libexec/vyprvpn";
+const TRAY_PATH: &str = "/usr/local/libexec/vyprvpn/VyprVPN";
+const DAEMON_LABEL: &str = "com.vyprvpn.helper";
+const DAEMON_PLIST_PATH: &str = "/Library/LaunchDaemons/com.vyprvpn.helper.plist";
+const AGENT_PLIST: &str = "Library/LaunchAgents/com.vyprvpn.tray.plist";
+const DAEMON_PLIST: &str = include_str!("../../macos/com.vyprvpn.helper.plist");
+const AGENT_PLIST_TEXT: &str = include_str!("../../macos/com.vyprvpn.tray.plist");
 const LAUNCHCTL: &str = "/bin/launchctl";
 const DSCL: &str = "/usr/bin/dscl";
 /// What `launchctl print` exits with for a service that is not loaded.
@@ -27,9 +27,9 @@ const LAUNCHCTL_NOT_FOUND: i32 = 113;
 pub enum InstallError {
     #[error("permission denied: run this with sudo")]
     NotRoot,
-    #[error("run this with sudo from the account that will use VyprLite ({0} is not set)")]
+    #[error("run this with sudo from the account that will use VyprVPN ({0} is not set)")]
     NotSudo(&'static str),
-    #[error("run sudo from the account that will use VyprLite, not from a root shell")]
+    #[error("run sudo from the account that will use VyprVPN, not from a root shell")]
     RootOwner,
     #[error("SUDO_UID is not a uid: {0}")]
     InvalidUid(#[from] ParseIntError),
@@ -90,11 +90,11 @@ enum Step {
 fn install_plan(exe_dir: &Path, owner: &Owner, daemon_loaded: bool) -> Vec<Step> {
     let mut plan = vec![
         Step::Copy {
-            from: exe_dir.join("vyprlite-helper"),
+            from: exe_dir.join("vyprvpn-helper"),
             to: HELPER_PATH.into(),
         },
         Step::Copy {
-            from: exe_dir.join("VyprLite"),
+            from: exe_dir.join("VyprVPN"),
             to: TRAY_PATH.into(),
         },
         Step::Write {
@@ -172,7 +172,7 @@ pub fn install() -> Result<(), InstallError> {
     let exe_dir = crate::exe_dir().map_err(InstallError::ExeDir)?;
 
     execute(&install_plan(&exe_dir, &owner, daemon_loaded()?))?;
-    println!("VyprLite is installed and starts at your next login.");
+    println!("VyprVPN is installed and starts at your next login.");
 
     Ok(())
 }
@@ -184,7 +184,7 @@ pub fn uninstall() -> Result<(), InstallError> {
     });
 
     execute(&plan)?;
-    println!("VyprLite is uninstalled.");
+    println!("VyprVPN is uninstalled.");
 
     Ok(())
 }
@@ -358,32 +358,28 @@ mod tests {
 
     #[test]
     fn install_copies_the_binaries_loads_the_daemon_and_autostarts_the_tray() {
-        let plan = install_plan(
-            Path::new("/Users/alice/Downloads/VyprLite"),
-            &alice(),
-            false,
-        );
+        let plan = install_plan(Path::new("/Users/alice/Downloads/VyprVPN"), &alice(), false);
 
         assert_eq!(
             plan,
             [
                 Step::Copy {
-                    from: "/Users/alice/Downloads/VyprLite/vyprlite-helper".into(),
-                    to: "/Library/PrivilegedHelperTools/com.vyprlite.helper".into(),
+                    from: "/Users/alice/Downloads/VyprVPN/vyprvpn-helper".into(),
+                    to: "/Library/PrivilegedHelperTools/com.vyprvpn.helper".into(),
                 },
                 Step::Copy {
-                    from: "/Users/alice/Downloads/VyprLite/VyprLite".into(),
-                    to: "/usr/local/libexec/vyprlite/VyprLite".into(),
+                    from: "/Users/alice/Downloads/VyprVPN/VyprVPN".into(),
+                    to: "/usr/local/libexec/vyprvpn/VyprVPN".into(),
                 },
                 Step::Write {
-                    path: "/Library/LaunchDaemons/com.vyprlite.helper.plist".into(),
+                    path: "/Library/LaunchDaemons/com.vyprvpn.helper.plist".into(),
                     contents: daemon_plist(501),
                     owner: 0,
                 },
                 Step::CreateWakeFile { owner: 501 },
                 Step::Bootstrap,
                 Step::Write {
-                    path: "/Users/alice/Library/LaunchAgents/com.vyprlite.tray.plist".into(),
+                    path: "/Users/alice/Library/LaunchAgents/com.vyprvpn.tray.plist".into(),
                     contents: AGENT_PLIST_TEXT.into(),
                     owner: 501,
                 },
@@ -393,7 +389,7 @@ mod tests {
 
     #[test]
     fn install_unloads_a_loaded_daemon_before_loading_it_again() {
-        let exe_dir = Path::new("/tmp/VyprLite");
+        let exe_dir = Path::new("/tmp/VyprVPN");
         let mut expected = install_plan(exe_dir, &alice(), false);
         expected.insert(4, Step::Bootout);
 
@@ -406,7 +402,7 @@ mod tests {
 
         assert!(!plist.contains('@'), "{plist}");
         assert!(plist.contains(
-            "<string>/Library/PrivilegedHelperTools/com.vyprlite.helper</string>\n\
+            "<string>/Library/PrivilegedHelperTools/com.vyprvpn.helper</string>\n\
              \t\t<string>--daemon</string>\n\
              \t\t<string>--owner-uid</string>\n\
              \t\t<string>501</string>"
@@ -427,13 +423,13 @@ mod tests {
             [
                 Step::Disconnect,
                 Step::Bootout,
-                Step::Remove("/Users/alice/Library/LaunchAgents/com.vyprlite.tray.plist".into()),
-                Step::Remove("/Library/LaunchDaemons/com.vyprlite.helper.plist".into()),
-                Step::Remove("/var/db/vyprlite.wake".into()),
-                Step::Remove("/var/run/vyprlite.sock".into()),
-                Step::Remove("/Library/PrivilegedHelperTools/com.vyprlite.helper".into()),
-                Step::RemoveDir("/usr/local/libexec/vyprlite".into()),
-                Step::RemoveDir("/Library/Application Support/VyprLite".into()),
+                Step::Remove("/Users/alice/Library/LaunchAgents/com.vyprvpn.tray.plist".into()),
+                Step::Remove("/Library/LaunchDaemons/com.vyprvpn.helper.plist".into()),
+                Step::Remove("/var/db/vyprvpn.wake".into()),
+                Step::Remove("/var/run/vyprvpn.sock".into()),
+                Step::Remove("/Library/PrivilegedHelperTools/com.vyprvpn.helper".into()),
+                Step::RemoveDir("/usr/local/libexec/vyprvpn".into()),
+                Step::RemoveDir("/Library/Application Support/VyprVPN".into()),
             ]
         );
     }
@@ -448,7 +444,7 @@ mod tests {
             plan[..2],
             [
                 Step::Bootout,
-                Step::Remove("/Users/alice/Library/LaunchAgents/com.vyprlite.tray.plist".into())
+                Step::Remove("/Users/alice/Library/LaunchAgents/com.vyprvpn.tray.plist".into())
             ]
         );
         assert!(!plan.contains(&Step::Disconnect));

@@ -1,6 +1,6 @@
 ## Parent
 
-`../parent.md` (VyprLite: all-Rust GPUI tray app + privileged helper)
+`../parent.md` (VyprVPN: all-Rust GPUI tray app + privileged helper)
 
 ## What to build
 
@@ -8,7 +8,7 @@ The helper fetches the location list from the Vypr locations endpoint (see paren
 
 Build the menu so it can be updated in place (enable/disable, relabel) without being torn down while it is open.
 
-The tray app caches country flags for the popover. Flags come from `https://api.vyprvpn.com/images/vpn_flags/64/{country_code lowercase}.png` using the location's 3-letter `country_code`, downloaded once by the tray app and cached on disk in `%LOCALAPPDATA%\VyprLite\flags` (macOS: `~/Library/Caches/VyprLite/flags`), keyed by code. A missing or failed flag shows a neutral placeholder and never blocks the UI.
+The tray app caches country flags for the popover. Flags come from `https://api.vyprvpn.com/images/vpn_flags/64/{country_code lowercase}.png` using the location's 3-letter `country_code`, downloaded once by the tray app and cached on disk in `%LOCALAPPDATA%\VyprVPN\flags` (macOS: `~/Library/Caches/VyprVPN/flags`), keyed by code. A missing or failed flag shows a neutral placeholder and never blocks the UI.
 
 ## Acceptance criteria
 

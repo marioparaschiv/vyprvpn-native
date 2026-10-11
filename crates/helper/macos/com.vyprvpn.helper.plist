@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-Installed as /Library/LaunchDaemons/com.vyprlite.helper.plist; the installer replaces @OWNER_UID@
+Installed as /Library/LaunchDaemons/com.vyprvpn.helper.plist; the installer replaces @OWNER_UID@
 with the installing user's uid. Nothing runs at boot: launchd starts the helper when the tray app
 touches the wake file, and the helper exits by itself when idle. ThrottleInterval is low because
 an idle helper exits within seconds and must be startable again right away.
@@ -9,17 +9,17 @@ an idle helper exits within seconds and must be startable again right away.
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.vyprlite.helper</string>
+	<string>com.vyprvpn.helper</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Library/PrivilegedHelperTools/com.vyprlite.helper</string>
+		<string>/Library/PrivilegedHelperTools/com.vyprvpn.helper</string>
 		<string>--daemon</string>
 		<string>--owner-uid</string>
 		<string>@OWNER_UID@</string>
 	</array>
 	<key>WatchPaths</key>
 	<array>
-		<string>/var/db/vyprlite.wake</string>
+		<string>/var/db/vyprvpn.wake</string>
 	</array>
 	<key>ThrottleInterval</key>
 	<integer>1</integer>
