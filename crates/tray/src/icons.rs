@@ -17,9 +17,15 @@ const INNER_RADIUS: i32 = OUTER_RADIUS - BORDER_WIDTH;
 /// The border's brightness relative to the fill.
 const BORDER_SHADE_PERCENT: u32 = 72;
 
+/// The border's width as a share of the dot's radius.
+pub const BORDER_SHARE: f32 = BORDER_WIDTH as f32 / OUTER_RADIUS as f32;
+
+/// The connected dot's fill.
+pub const CONNECTED: [u8; 3] = [0x8E, 0xE0, 0xA1];
+
 const GREY: [u8; BYTES] = dot([0x9E, 0x9E, 0x9E]);
 const BLUE: [u8; BYTES] = dot([0x4C, 0xB1, 0xF5]);
-const GREEN: [u8; BYTES] = dot([0x8E, 0xE0, 0xA1]);
+const GREEN: [u8; BYTES] = dot(CONNECTED);
 
 /// Which tray icon shows: grey disconnected, blue busy, green connected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,7 +45,7 @@ pub fn icon(kind: IconKind) -> Result<Icon, BadIcon> {
     Icon::from_rgba(rgba.to_vec(), SIZE, SIZE)
 }
 
-const fn darker([r, g, b]: [u8; 3]) -> [u8; 3] {
+pub const fn darker([r, g, b]: [u8; 3]) -> [u8; 3] {
     const fn shade(channel: u8) -> u8 {
         ((channel as u32 * BORDER_SHADE_PERCENT + 50) / 100) as u8
     }

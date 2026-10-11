@@ -1,17 +1,25 @@
-//! The dithered globe behind the main page's status, drawn once for each text colour and display
-//! scale it is shown at.
+//! The dithered globe behind the main page's status: at rest while disconnected, spinning while
+//! connecting, and turned and zoomed onto the server, marked with the tray's connected dot, once
+//! connected. It is redrawn only for the frames in which it moves.
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Instant;
 
+use ::globe::Canvas;
+use ::globe::motion::{Marker, Motion, Pose, Target};
+use ::globe::places;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use image::{Frame, Rgba as Pixel, RgbaImage};
+use ipc::Status;
 
 use super::CARD;
+use crate::helper_link::{HelperState, LinkState};
+use crate::icons;
 
-/// The globe's centre height and radius on the main page, in logical pixels. It is centred
-/// horizontally, cropped by the card's top and sides, and stops above the Connect button.
+/// The globe's centre height and radius on the main page, in logical pixels, before zooming. It is
+/// centred horizontally, cropped by the card's top and sides, and stops above the Connect button.
 const CENTRE_Y: f32 = 125.;
 const RADIUS: f32 = 185.;
 const HEIGHT: f32 = 310.;
@@ -21,23 +29,76 @@ const OPACITY: f32 = 0.14;
 
 const TWO: NonZeroU32 = NonZeroU32::new(2).unwrap();
 
-#[derive(Default)]
+/// The marker's diameter at full size, in logical pixels.
+const MARKER: f32 = 12.;
+
 pub struct Globe {
+    motion: Motion,
     drawn: Option<Drawn>,
 }
 
 struct Drawn {
     scale: f32,
     color: Rgba,
+    pose: Pose,
     image: Arc<RenderImage>,
 }
 
+/// Where the globe heads for in a connection state: the server's place once connected, if known.
+pub fn target(state: &LinkState) -> Target {
+    match &state.helper {
+        HelperState::Running(Status::Connecting { .. }) => Target::Spin,
+        HelperState::Running(Status::Connected { spoke_id, .. }) => {
+            let country_code = state
+                .locations
+                .find(spoke_id)
+                .map(|location| location.country_code.as_str());
+
+            places::place(spoke_id, country_code).map_or(Target::Home, Target::Place)
+        }
+        _ => Target::Home,
+    }
+}
+
 impl Globe {
-    pub fn render(&mut self, window: &mut Window, cx: &App) -> Img {
+    /// Shows `target` without an animation, other than spinning.
+    pub fn new(target: Target, now: Instant, reduce_motion: bool) -> Self {
+        Self {
+            motion: if reduce_motion {
+                Motion::still(target, now)
+            } else {
+                Motion::new(target, now)
+            },
+            drawn: None,
+        }
+    }
+
+    pub fn set_target(&mut self, target: Target, now: Instant, reduce_motion: bool) {
+        if target == self.motion.target() {
+            return;
+        }
+
+        self.motion = if reduce_motion {
+            Motion::still(target, now)
+        } else {
+            self.motion.retarget(target, now)
+        };
+    }
+
+    pub fn render(&mut self, window: &mut Window, cx: &App) -> Div {
+        let scene = self.motion.scene(cx.background_executor().now());
+        if scene.moving {
+            window.request_animation_frame();
+        }
+
         let scale = window.scale_factor();
         let color = cx.theme().popover_foreground.opacity(OPACITY).to_rgb();
         let drawn = match self.drawn.take() {
-            Some(drawn) if drawn.scale == scale && drawn.color == color => drawn,
+            Some(drawn)
+                if drawn.scale == scale && drawn.color == color && drawn.pose == scene.pose =>
+            {
+                drawn
+            }
             stale => {
                 if let Some(stale) = stale
                     && let Err(error) = window.drop_image(stale.image)
@@ -47,33 +108,44 @@ impl Globe {
                 Drawn {
                     scale,
                     color,
-                    image: draw(scale, color),
+                    pose: scene.pose,
+                    image: draw(&canvas(scale, scene.pose), color),
                 }
             }
         };
         let size = drawn.image.size(0);
-        let image = drawn.image.clone();
-        self.drawn = Some(drawn);
-
-        img(image)
+        let image = img(drawn.image.clone())
             .absolute()
             .top_0()
             .left_0()
             .w(px(size.width.0 as f32 / scale))
-            .h(px(size.height.0 as f32 / scale))
+            .h(px(size.height.0 as f32 / scale));
+        self.drawn = Some(drawn);
+
+        div().absolute().size_full().child(image).children(
+            scene
+                .marker
+                .and_then(|marker| render_marker(marker, &canvas(scale, scene.pose), scale)),
+        )
     }
 }
 
-/// Each dot covers whole device pixels: one on standard displays, two from 150% scale up.
-fn draw(scale: f32, color: Rgba) -> Arc<RenderImage> {
+/// The canvas in device pixels. Each dot covers whole device pixels: one on standard displays, two
+/// from 150% scale up.
+fn canvas(scale: f32, pose: Pose) -> Canvas {
     let width = CARD.width.as_f32() * scale;
-    let canvas = globe::Canvas {
+
+    Canvas {
         width: width.round() as u32,
         height: (HEIGHT * scale).round() as u32,
         centre: (width / 2., CENTRE_Y * scale),
-        radius: RADIUS * scale,
+        radius: RADIUS * pose.zoom * scale,
+        facing: pose.facing,
         dot: if scale >= 1.5 { TWO } else { NonZeroU32::MIN },
-    };
+    }
+}
+
+fn draw(canvas: &Canvas, color: Rgba) -> Arc<RenderImage> {
     let dots = canvas.dots();
 
     let channel = |value: f32| (value * 255.).round() as u8;
@@ -93,4 +165,75 @@ fn draw(scale: f32, color: Rgba) -> Arc<RenderImage> {
     });
 
     Arc::new(RenderImage::new([Frame::new(buffer)]))
+}
+
+/// The tray's connected dot, ringed the same way, centred on the marked place.
+fn render_marker(marker: Marker, canvas: &Canvas, scale: f32) -> Option<Div> {
+    let (x, y) = canvas.project(marker.at)?;
+    let diameter = MARKER * marker.scale;
+    let [fill, ring] = [icons::CONNECTED, icons::darker(icons::CONNECTED)]
+        .map(|[r, g, b]| rgb(u32::from_be_bytes([0, r, g, b])));
+
+    Some(
+        div()
+            .absolute()
+            .left(px(x / scale - diameter / 2.))
+            .top(px(y / scale - diameter / 2.))
+            .size(px(diameter))
+            .rounded_full()
+            .bg(fill)
+            .border(px(diameter / 2. * icons::BORDER_SHARE))
+            .border_color(ring),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use ::globe::Coordinates;
+    use ipc::Status;
+
+    use super::target;
+    use crate::helper_link::{HelperState, Locations};
+    use crate::popover::model::tests::state;
+    use crate::popover::recorded_locations;
+    use ::globe::motion::Target;
+
+    fn connected(spoke_id: &str) -> Status {
+        Status::Connected {
+            spoke_id: spoke_id.into(),
+            tunnel_ip: [10, 1, 2, 3].into(),
+            connected_at: 1_760_140_800,
+        }
+    }
+
+    #[test]
+    fn the_globe_spins_while_connecting_and_faces_the_server_once_connected() {
+        let mut state = state(
+            Status::Connecting {
+                spoke_id: "au3".into(),
+            },
+            None,
+        );
+        state.locations = Locations::Loaded(recorded_locations().unwrap());
+        assert_eq!(target(&state), Target::Spin);
+
+        state.helper = HelperState::Running(connected("au3"));
+        assert_eq!(
+            target(&state),
+            Target::Place(Coordinates {
+                lon: 115.8589,
+                lat: -31.9522
+            })
+        );
+
+        state.helper = HelperState::Running(connected("gone1"));
+        assert_eq!(target(&state), Target::Home);
+
+        state.helper = HelperState::Running(Status::Disconnecting {
+            spoke_id: "au3".into(),
+        });
+        assert_eq!(target(&state), Target::Home);
+        state.helper = HelperState::NotRunning;
+        assert_eq!(target(&state), Target::Home);
+    }
 }

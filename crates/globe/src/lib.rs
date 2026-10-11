@@ -1,5 +1,8 @@
-//! A retro picture of the Earth: an orthographic globe centred on Europe and the Atlantic, lit from
-//! the upper left and drawn as 1-bit dots with an ordered (Bayer) dither.
+//! A retro picture of the Earth: an orthographic globe turned to any point, lit from the upper left
+//! and drawn as 1-bit dots with an ordered (Bayer) dither.
+
+pub mod motion;
+pub mod places;
 
 use std::num::NonZeroU32;
 
@@ -13,10 +16,19 @@ pub const MASK_ROWS: usize = 360;
 /// significant bit first.
 static LAND: &[u8; MASK_COLUMNS * MASK_ROWS / 8] = include_bytes!("land.bin");
 
-/// The point facing the viewer, in degrees: the Atlantic off West Africa, which tilts Europe into
-/// the upper half.
-const CENTRE_LON: f32 = -5.0;
-const CENTRE_LAT: f32 = 20.0;
+/// A point on the Earth, in degrees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Coordinates {
+    pub lon: f32,
+    pub lat: f32,
+}
+
+/// The resting view: the Atlantic off West Africa faces the viewer, which tilts Europe into the
+/// upper half.
+pub const HOME: Coordinates = Coordinates {
+    lon: -5.0,
+    lat: 20.0,
+};
 
 /// Where the light comes from, in view space (x right, y up, z toward the viewer).
 const LIGHT: [f32; 3] = [-0.6, 0.6, 1.0];
@@ -64,23 +76,19 @@ pub struct Canvas {
     /// The globe's centre, which may lie anywhere, so the globe can be cropped.
     pub centre: (f32, f32),
     pub radius: f32,
+    /// The point drawn at the globe's centre.
+    pub facing: Coordinates,
     /// The side of each square dot.
     pub dot: NonZeroU32,
 }
 
 impl Canvas {
-    /// Where a longitude and latitude in degrees land on the canvas, or `None` on the far side.
-    pub fn project(&self, lon: f32, lat: f32) -> Option<(f32, f32)> {
-        let (sin_lat, cos_lat) = lat.to_radians().sin_cos();
-        let (sin_lon, cos_lon) = (lon - CENTRE_LON).to_radians().sin_cos();
-        let (sin_tilt, cos_tilt) = CENTRE_LAT.to_radians().sin_cos();
-
-        let z = sin_tilt * sin_lat + cos_tilt * cos_lat * cos_lon;
+    /// Where a point on the Earth lands on the canvas, or `None` on the far side.
+    pub fn project(&self, point: Coordinates) -> Option<(f32, f32)> {
+        let (x, y, z) = Turn::new(self.facing).to_view(point);
         if z < 0.0 {
             return None;
         }
-        let x = cos_lat * sin_lon;
-        let y = cos_tilt * sin_lat - sin_tilt * cos_lat * cos_lon;
 
         Some((
             self.centre.0 + x * self.radius,
@@ -94,13 +102,14 @@ impl Canvas {
         let mut dots = vec![false; self.width as usize * self.height as usize];
         let length = LIGHT.iter().map(|axis| axis * axis).sum::<f32>().sqrt();
         let light = LIGHT.map(|axis| axis / length);
+        let turn = Turn::new(self.facing);
 
         for cell_y in 0..self.height.div_ceil(dot) {
             for cell_x in 0..self.width.div_ceil(dot) {
                 let x = (cell_x * dot) as f32 + dot as f32 / 2.0;
                 let y = (cell_y * dot) as f32 + dot as f32 / 2.0;
                 let shown = self
-                    .tone(x, y, light)
+                    .tone(x, y, light, &turn)
                     .is_some_and(|tone| tone > threshold(cell_x, cell_y));
                 if !shown {
                     continue;
@@ -119,7 +128,7 @@ impl Canvas {
     }
 
     /// How densely the globe is dotted at a pixel, or `None` off the globe.
-    fn tone(&self, x: f32, y: f32, light: [f32; 3]) -> Option<f32> {
+    fn tone(&self, x: f32, y: f32, light: [f32; 3], turn: &Turn) -> Option<f32> {
         let nx = (x - self.centre.0) / self.radius;
         let ny = (self.centre.1 - y) / self.radius;
         let distance = nx * nx + ny * ny;
@@ -129,8 +138,8 @@ impl Canvas {
         let nz = (1.0 - distance).sqrt();
 
         let lambert = (nx * light[0] + ny * light[1] + nz * light[2]).max(0.0);
-        let (lon, lat) = unproject(nx, ny, nz);
-        let cover = if is_land(lon, lat) {
+        let point = turn.to_earth(nx, ny, nz);
+        let cover = if is_land(point.lon, point.lat) {
             LAND_COVER
         } else {
             SEA_COVER
@@ -142,13 +151,48 @@ impl Canvas {
     }
 }
 
-/// The longitude and latitude in degrees under a point on the unit sphere in view space.
-fn unproject(x: f32, y: f32, z: f32) -> (f32, f32) {
-    let (sin_tilt, cos_tilt) = CENTRE_LAT.to_radians().sin_cos();
-    let lat = (y * cos_tilt + z * sin_tilt).clamp(-1.0, 1.0).asin();
-    let lon = x.atan2(z * cos_tilt - y * sin_tilt);
+/// The rotation that brings a point on the Earth to face the viewer.
+struct Turn {
+    lon: f32,
+    sin_tilt: f32,
+    cos_tilt: f32,
+}
 
-    (CENTRE_LON + lon.to_degrees(), lat.to_degrees())
+impl Turn {
+    fn new(facing: Coordinates) -> Self {
+        let (sin_tilt, cos_tilt) = facing.lat.to_radians().sin_cos();
+
+        Self {
+            lon: facing.lon,
+            sin_tilt,
+            cos_tilt,
+        }
+    }
+
+    /// A point on the Earth in view space (x right, y up, z toward the viewer), on the unit sphere.
+    fn to_view(&self, point: Coordinates) -> (f32, f32, f32) {
+        let (sin_lat, cos_lat) = point.lat.to_radians().sin_cos();
+        let (sin_lon, cos_lon) = (point.lon - self.lon).to_radians().sin_cos();
+
+        (
+            cos_lat * sin_lon,
+            self.cos_tilt * sin_lat - self.sin_tilt * cos_lat * cos_lon,
+            self.sin_tilt * sin_lat + self.cos_tilt * cos_lat * cos_lon,
+        )
+    }
+
+    /// The point on the Earth under a point on the unit sphere in view space.
+    fn to_earth(&self, x: f32, y: f32, z: f32) -> Coordinates {
+        let lat = (y * self.cos_tilt + z * self.sin_tilt)
+            .clamp(-1.0, 1.0)
+            .asin();
+        let lon = x.atan2(z * self.cos_tilt - y * self.sin_tilt);
+
+        Coordinates {
+            lon: self.lon + lon.to_degrees(),
+            lat: lat.to_degrees(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -160,8 +204,13 @@ mod tests {
         height: 300,
         centre: (200.0, 160.0),
         radius: 180.0,
+        facing: HOME,
         dot: NonZeroU32::MIN,
     };
+
+    fn at(lon: f32, lat: f32) -> Coordinates {
+        Coordinates { lon, lat }
+    }
 
     fn assert_near((x, y): (f32, f32), (expected_x, expected_y): (f32, f32)) {
         assert!(
@@ -172,39 +221,61 @@ mod tests {
 
     #[test]
     fn projects_onto_the_facing_hemisphere() {
+        assert_near(CANVAS.project(HOME).unwrap(), CANVAS.centre);
         assert_near(
-            CANVAS.project(CENTRE_LON, CENTRE_LAT).unwrap(),
-            CANVAS.centre,
-        );
-        assert_near(
-            CANVAS.project(CENTRE_LON + 60.0, 0.0).unwrap(),
+            CANVAS.project(at(HOME.lon + 60.0, 0.0)).unwrap(),
             (
                 200.0 + 180.0 * 60f32.to_radians().sin(),
                 160.0 + 180.0 * 20f32.to_radians().sin() * 60f32.to_radians().cos(),
             ),
         );
         assert_near(
-            CANVAS.project(0.0, 90.0).unwrap(),
+            CANVAS.project(at(0.0, 90.0)).unwrap(),
             (200.0, 160.0 - 180.0 * 20f32.to_radians().cos()),
         );
     }
 
     #[test]
     fn culls_the_far_hemisphere() {
-        assert_eq!(CANVAS.project(CENTRE_LON + 180.0, 0.0), None);
-        assert_eq!(CANVAS.project(CENTRE_LON + 180.0, -CENTRE_LAT), None);
-        assert_eq!(CANVAS.project(0.0, -90.0), None);
+        assert_eq!(CANVAS.project(at(HOME.lon + 180.0, 0.0)), None);
+        assert_eq!(CANVAS.project(at(HOME.lon + 180.0, -HOME.lat)), None);
+        assert_eq!(CANVAS.project(at(0.0, -90.0)), None);
+    }
+
+    #[test]
+    fn a_turned_and_zoomed_globe_puts_the_facing_point_at_its_centre() {
+        let perth = at(115.86, -31.95);
+        let zoomed = Canvas {
+            facing: perth,
+            radius: CANVAS.radius * 1.8,
+            ..CANVAS
+        };
+
+        assert_near(zoomed.project(perth).unwrap(), zoomed.centre);
+        // A degree east of Perth lies right of the centre, 1.8 times as far as unzoomed.
+        let east = at(perth.lon + 1.0, perth.lat);
+        let unzoomed = Canvas {
+            facing: perth,
+            ..CANVAS
+        };
+        let zoomed_offset = zoomed.project(east).unwrap().0 - zoomed.centre.0;
+        let unzoomed_offset = unzoomed.project(east).unwrap().0 - unzoomed.centre.0;
+        assert!(unzoomed_offset > 0.0);
+        assert!((zoomed_offset - unzoomed_offset * 1.8).abs() < 0.01);
+        assert_eq!(zoomed.project(at(perth.lon + 180.0, -perth.lat)), None);
     }
 
     #[test]
     fn unprojects_what_it_projects() {
+        let turn = Turn::new(CANVAS.facing);
         for (lon, lat) in [(2.35, 48.85), (-43.2, -22.9), (31.2, 30.0), (-74.0, 40.7)] {
-            let (x, y) = CANVAS.project(lon, lat).unwrap();
+            let (x, y) = CANVAS.project(at(lon, lat)).unwrap();
             let nx = (x - CANVAS.centre.0) / CANVAS.radius;
             let ny = (CANVAS.centre.1 - y) / CANVAS.radius;
             let nz = (1.0 - nx * nx - ny * ny).sqrt();
+            let point = turn.to_earth(nx, ny, nz);
 
-            assert_near(unproject(nx, ny, nz), (lon, lat));
+            assert_near((point.lon, point.lat), (lon, lat));
         }
     }
 
@@ -257,8 +328,8 @@ mod tests {
     #[test]
     fn dots_land_more_densely_than_sea() {
         let dots = CANVAS.dots();
-        let sahara = density(&dots, &CANVAS, CANVAS.project(10.0, 23.0).unwrap());
-        let atlantic = density(&dots, &CANVAS, CANVAS.project(-35.0, 30.0).unwrap());
+        let sahara = density(&dots, &CANVAS, CANVAS.project(at(10.0, 23.0)).unwrap());
+        let atlantic = density(&dots, &CANVAS, CANVAS.project(at(-35.0, 30.0)).unwrap());
 
         assert!(
             sahara > atlantic * 2,

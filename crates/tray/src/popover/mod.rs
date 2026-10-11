@@ -158,18 +158,17 @@ impl Popover {
             theme::observe_window(window),
         ];
 
+        let now = cx.background_executor().now();
         let mut popover = Self {
             state: LinkState::default(),
             page: Page::Main,
             locations,
             focus_handle,
             flag_dir,
-            presence: Presence::Entering {
-                since: cx.background_executor().now(),
-            },
+            presence: Presence::Entering { since: now },
             toward_icon: None,
             surface: Surface::default(),
-            globe: Globe::default(),
+            globe: Globe::new(globe::target(&state), now, cx.reduce_motion()),
             _ticks: None,
             _closing: None,
             _subscriptions,
@@ -205,6 +204,11 @@ impl Popover {
             }));
         }
 
+        self.globe.set_target(
+            globe::target(&state),
+            cx.background_executor().now(),
+            cx.reduce_motion(),
+        );
         self.state = state;
         cx.notify();
     }

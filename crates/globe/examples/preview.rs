@@ -20,6 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         height: SIZE,
         centre: (SIZE as f32 / 2.0, SIZE as f32 / 2.0),
         radius: SIZE as f32 / 2.0 - 4.0,
+        facing: globe::HOME,
         dot,
     };
     let dots = canvas.dots();

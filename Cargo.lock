@@ -2702,6 +2702,8 @@ name = "globe"
 version = "0.1.0"
 dependencies = [
  "image",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
