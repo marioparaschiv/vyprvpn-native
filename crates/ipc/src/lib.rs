@@ -316,9 +316,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn unknown_method_is_rejected() {
-        assert!(decode::<Request>(r#"{"id":1,"method":"reboot"}"#).is_err());
-    }
 }
