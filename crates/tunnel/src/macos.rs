@@ -1,28 +1,19 @@
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::process::{Command, ExitStatus};
+use std::path::Path;
 
 use boringtun::device::{DeviceConfig, DeviceHandle};
 
-use crate::macos_plan::{
-    self, IFCONFIG, Invocation, NETWORKSETUP, ParseError, ROUTE, SavedDns, Teardown,
-};
+use crate::command::{self, CommandError, Invocation};
+use crate::macos_plan::{self, NETWORKSETUP, ParseError, ROUTE, SavedDns, Teardown};
 use crate::plan::AdapterPlan;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TunnelError {
-    #[error("running {command}")]
-    Spawn {
-        command: String,
-        #[source]
-        source: io::Error,
-    },
-    #[error("{command} failed ({status}): {output}")]
-    Command {
-        command: String,
-        status: ExitStatus,
-        output: String,
-    },
+    #[error(transparent)]
+    Command(#[from] CommandError),
+    #[error("{command} reported an error: {output}")]
+    NetworksetupFailed { command: String, output: String },
     #[error(transparent)]
     Parse(#[from] ParseError),
     #[error("creating WireGuard interface {interface}")]
@@ -61,15 +52,13 @@ fn describe(errors: &[TunnelError]) -> String {
 pub struct ActiveTunnel {
     teardown: Teardown,
     torn_down: bool,
-    // Declared last so the utun closes after the teardown in `drop` has run.
     _device: DeviceHandle,
 }
 
 /// Creates a utun driven by boringtun and applies `plan`. On any error the changes made so far
 /// are undone.
 pub fn up(plan: &AdapterPlan) -> Result<ActiveTunnel, TunnelError> {
-    let route =
-        macos_plan::parse_default_route(&run(&Invocation::new(ROUTE, &["-n", "get", "default"]))?)?;
+    let route = macos_plan::parse_default_route(&run(&macos_plan::default_route_query())?)?;
     let dns = if plan.dns.is_empty() {
         None
     } else {
@@ -77,11 +66,10 @@ pub fn up(plan: &AdapterPlan) -> Result<ActiveTunnel, TunnelError> {
     };
     let teardown = Teardown {
         endpoint: *plan.peer.endpoint.ip(),
-        gateway: route.gateway,
         dns,
     };
 
-    let interface = macos_plan::free_utun(&run(&Invocation::new(IFCONFIG, &["-l"]))?);
+    let interface = macos_plan::free_utun(&run(&macos_plan::interface_list())?);
     let device = DeviceHandle::new(&interface, DeviceConfig::default()).map_err(|source| {
         TunnelError::Device {
             interface: interface.clone(),
@@ -90,7 +78,7 @@ pub fn up(plan: &AdapterPlan) -> Result<ActiveTunnel, TunnelError> {
     })?;
     configure(&interface, plan)?;
 
-    let applied = macos_plan::up_commands(&interface, plan, &teardown)
+    let applied = macos_plan::up_commands(&interface, plan, route.gateway, teardown.dns.as_ref())
         .iter()
         .try_for_each(|command| run(command).map(drop));
     if let Err(error) = applied {
@@ -144,8 +132,9 @@ impl Teardown {
             .iter()
             .filter_map(|command| match run(command) {
                 Ok(_) => None,
-                Err(TunnelError::Command { output, .. })
-                    if command.program == ROUTE && macos_plan::route_was_missing(&output) =>
+                Err(TunnelError::Command(CommandError::Failed { output, .. }))
+                    if command.program == Path::new(ROUTE)
+                        && macos_plan::route_was_missing(&output) =>
                 {
                     None
                 }
@@ -162,15 +151,9 @@ impl Teardown {
 }
 
 fn saved_dns(device: &str) -> Result<SavedDns, TunnelError> {
-    let order = run(&Invocation::new(
-        NETWORKSETUP,
-        &["-listnetworkserviceorder"],
-    ))?;
+    let order = run(&macos_plan::service_order())?;
     let service = macos_plan::service_for_device(&order, device)?;
-    let servers = macos_plan::parse_dns_servers(&run(&Invocation::new(
-        NETWORKSETUP,
-        &["-getdnsservers", &service],
-    ))?)?;
+    let servers = macos_plan::parse_dns_servers(&run(&macos_plan::dns_servers_query(&service))?)?;
 
     Ok(SavedDns { service, servers })
 }
@@ -199,29 +182,17 @@ fn configure(interface: &str, plan: &AdapterPlan) -> Result<(), TunnelError> {
     }
 }
 
-/// Runs `invocation` and returns its stdout, or its output as an error when it exits non-zero
-/// or, for networksetup, reports an error while exiting 0.
+/// Runs `invocation` and returns its stdout. networksetup can report an error while exiting 0,
+/// so its output is checked too.
 fn run(invocation: &Invocation) -> Result<String, TunnelError> {
-    let output = Command::new(invocation.program)
-        .args(&invocation.args)
-        .output()
-        .map_err(|source| TunnelError::Spawn {
-            command: invocation.to_string(),
-            source,
-        })?;
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let output = command::run(invocation)?;
 
-    let reported_error =
-        invocation.program == NETWORKSETUP && macos_plan::networksetup_failed(&text);
-    if output.status.success() && !reported_error {
-        return Ok(text);
+    if invocation.program == Path::new(NETWORKSETUP) && macos_plan::networksetup_failed(&output) {
+        return Err(TunnelError::NetworksetupFailed {
+            command: invocation.to_string(),
+            output: output.trim().to_owned(),
+        });
     }
 
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-
-    Err(TunnelError::Command {
-        command: invocation.to_string(),
-        status: output.status,
-        output: text.trim().to_owned(),
-    })
+    Ok(output)
 }

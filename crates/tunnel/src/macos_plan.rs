@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
-use std::fmt;
 use std::net::{IpAddr, Ipv4Addr};
 
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use crate::command::Invocation;
 use crate::plan::AdapterPlan;
 
 pub(crate) const IFCONFIG: &str = "/sbin/ifconfig";
@@ -12,28 +12,6 @@ pub(crate) const ROUTE: &str = "/sbin/route";
 pub(crate) const NETWORKSETUP: &str = "/usr/sbin/networksetup";
 const MTU: u16 = 1420;
 const NO_DNS_SERVERS: &str = "There aren't any DNS Servers set on";
-
-/// One command to run, with its arguments.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Invocation {
-    pub program: &'static str,
-    pub args: Vec<String>,
-}
-
-impl Invocation {
-    pub(crate) fn new(program: &'static str, args: &[&str]) -> Self {
-        Self {
-            program,
-            args: args.iter().map(|&arg| arg.to_owned()).collect(),
-        }
-    }
-}
-
-impl fmt::Display for Invocation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.program, self.args.join(" "))
-    }
-}
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ParseError {
@@ -47,6 +25,22 @@ pub enum ParseError {
     Dns(String),
     #[error("no errno in the WireGuard UAPI reply {0:?}")]
     UapiReply(String),
+}
+
+pub(crate) fn default_route_query() -> Invocation {
+    Invocation::new(ROUTE, &["-n", "get", "default"])
+}
+
+pub(crate) fn interface_list() -> Invocation {
+    Invocation::new(IFCONFIG, &["-l"])
+}
+
+pub(crate) fn service_order() -> Invocation {
+    Invocation::new(NETWORKSETUP, &["-listnetworkserviceorder"])
+}
+
+pub(crate) fn dns_servers_query(service: &str) -> Invocation {
+    Invocation::new(NETWORKSETUP, &["-getdnsservers", service])
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -193,7 +187,7 @@ pub(crate) fn networksetup_failed(output: &str) -> bool {
 /// A service's DNS servers before VyprLite replaced them. No servers means the service had none
 /// of its own and used the ones from DHCP.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SavedDns {
+pub(crate) struct SavedDns {
     pub(crate) service: String,
     pub(crate) servers: Vec<IpAddr>,
 }
@@ -203,7 +197,6 @@ pub struct SavedDns {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Teardown {
     pub(crate) endpoint: Ipv4Addr,
-    pub(crate) gateway: Ipv4Addr,
     pub(crate) dns: Option<SavedDns>,
 }
 
@@ -220,7 +213,7 @@ impl Teardown {
                 servers => args.extend(servers.iter().map(IpAddr::to_string)),
             }
             commands.push(Invocation {
-                program: NETWORKSETUP,
+                program: NETWORKSETUP.into(),
                 args,
             });
         }
@@ -235,12 +228,13 @@ impl Teardown {
 }
 
 /// Commands that configure `interface` for `plan` once boringtun has created it: address and
-/// MTU, a route keeping the endpoint on the original gateway, the split default route, then DNS
-/// for the service `teardown` saved it from.
+/// MTU, a route keeping the endpoint on the original `gateway`, the split default route, then DNS
+/// for the service `saved_dns` was saved from.
 pub(crate) fn up_commands(
     interface: &str,
     plan: &AdapterPlan,
-    teardown: &Teardown,
+    gateway: Ipv4Addr,
+    saved_dns: Option<&SavedDns>,
 ) -> Vec<Invocation> {
     let address = plan.address.addr().to_string();
     let mut commands = vec![
@@ -262,9 +256,9 @@ pub(crate) fn up_commands(
                 "-n",
                 "add",
                 "-inet",
-                &teardown.endpoint.to_string(),
+                &plan.peer.endpoint.ip().to_string(),
                 "-gateway",
-                &teardown.gateway.to_string(),
+                &gateway.to_string(),
             ],
         ),
     ];
@@ -283,11 +277,11 @@ pub(crate) fn up_commands(
         )
     }));
 
-    if let Some(saved) = &teardown.dns {
+    if let Some(saved) = saved_dns {
         let mut args = vec!["-setdnsservers".to_owned(), saved.service.clone()];
         args.extend(plan.dns.iter().map(Ipv4Addr::to_string));
         commands.push(Invocation {
-            program: NETWORKSETUP,
+            program: NETWORKSETUP.into(),
             args,
         });
     }
@@ -297,6 +291,8 @@ pub(crate) fn up_commands(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use crate::fixtures::realistic_plan;
 
@@ -332,10 +328,11 @@ destination: default
         Invocation::new(program, args)
     }
 
+    const GATEWAY: Ipv4Addr = Ipv4Addr::new(192, 168, 1, 1);
+
     fn teardown(dns: Option<SavedDns>) -> Teardown {
         Teardown {
             endpoint: Ipv4Addr::new(203, 0, 113, 10),
-            gateway: Ipv4Addr::new(192, 168, 1, 1),
             dns,
         }
     }
@@ -432,11 +429,6 @@ destination: default
     }
 
     #[test]
-    fn uapi_socket_is_named_after_the_interface() {
-        assert_eq!(uapi_socket("utun4"), "/var/run/wireguard/utun4.sock");
-    }
-
-    #[test]
     fn uapi_set_carries_hex_keys_endpoint_and_split_route() {
         let expected = format!(
             "set=1\n\
@@ -467,10 +459,10 @@ destination: default
 
     #[test]
     fn up_configures_interface_routes_and_dns_in_order() {
-        let teardown = teardown(wifi_dns(&["1.1.1.1"]));
+        let saved_dns = wifi_dns(&["1.1.1.1"]);
 
         assert_eq!(
-            up_commands("utun4", &realistic_plan(), &teardown),
+            up_commands("utun4", &realistic_plan(), GATEWAY, saved_dns.as_ref()),
             [
                 command(
                     IFCONFIG,
@@ -507,13 +499,13 @@ destination: default
 
     #[test]
     fn up_leaves_dns_alone_without_a_saved_service() {
-        let commands = up_commands("utun4", &realistic_plan(), &teardown(None));
+        let commands = up_commands("utun4", &realistic_plan(), GATEWAY, None);
 
         assert_eq!(commands.len(), 6);
         assert!(
             commands
                 .iter()
-                .all(|command| command.program != NETWORKSETUP)
+                .all(|command| command.program != Path::new(NETWORKSETUP))
         );
     }
 
@@ -555,7 +547,7 @@ destination: default
 
         assert_eq!(
             json,
-            r#"{"endpoint":"203.0.113.10","gateway":"192.168.1.1","dns":{"service":"Wi-Fi","servers":["1.1.1.1"]}}"#
+            r#"{"endpoint":"203.0.113.10","dns":{"service":"Wi-Fi","servers":["1.1.1.1"]}}"#
         );
         assert_eq!(serde_json::from_str::<Teardown>(&json).unwrap(), teardown);
     }

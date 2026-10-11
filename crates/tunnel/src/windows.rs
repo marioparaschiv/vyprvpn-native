@@ -1,22 +1,20 @@
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use ipnet::IpNet;
 use wireguard_nt::{Adapter, SetInterface, SetPeer, Wireguard};
 use zeroize::Zeroize;
 
-use crate::ADAPTER_NAME;
+use crate::command::{self, CommandError};
 use crate::netsh;
 use crate::plan::AdapterPlan;
 
 const DLL_NAME: &str = "wireguard.dll";
-const POOL: &str = "VyprLite";
+/// Names both the adapter and its wireguard-nt pool.
+const ADAPTER_NAME: &str = "VyprLite";
 /// A stable GUID lets Windows reuse one network profile instead of creating a new one per connect.
 const ADAPTER_GUID: u128 = 0x5f1e_6c3a_9b2d_4e71_8a40_c7d3_19b8_e26f;
-const ERROR_FILE_NOT_FOUND: i32 = 2;
-const ERROR_NOT_FOUND: i32 = 1168;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TunnelError {
@@ -36,18 +34,10 @@ pub enum TunnelError {
         #[source]
         source: wireguard_nt::Error,
     },
-    #[error("running netsh {args}")]
-    NetshSpawn {
-        args: String,
-        #[source]
-        source: io::Error,
-    },
-    #[error("netsh {args} failed ({status}): {output}")]
-    Netsh {
-        args: String,
-        status: std::process::ExitStatus,
-        output: String,
-    },
+    #[error("SystemRoot is not set, so netsh.exe cannot be located")]
+    SystemRootMissing,
+    #[error(transparent)]
+    Command(#[from] CommandError),
 }
 
 fn adapter_error(operation: &'static str) -> impl FnOnce(wireguard_nt::Error) -> TunnelError {
@@ -84,8 +74,9 @@ pub struct ActiveTunnel {
 
 /// Creates the adapter and applies `plan`. On any error the adapter is removed again.
 pub fn up(plan: &AdapterPlan) -> Result<ActiveTunnel, TunnelError> {
+    let netsh = netsh_path()?;
     let wireguard = load_wireguard()?;
-    let adapter = Adapter::create(&wireguard, POOL, ADAPTER_NAME, Some(ADAPTER_GUID))
+    let adapter = Adapter::create(&wireguard, ADAPTER_NAME, ADAPTER_NAME, Some(ADAPTER_GUID))
         .map_err(adapter_error("creating"))?;
 
     let mut interface = SetInterface {
@@ -112,8 +103,8 @@ pub fn up(plan: &AdapterPlan) -> Result<ActiveTunnel, TunnelError> {
         .map_err(adapter_error("setting the address and routes"))?;
     adapter.up().map_err(adapter_error("bringing up"))?;
 
-    for args in netsh::dns_commands(ADAPTER_NAME, &plan.dns) {
-        run_netsh(&args)?;
+    for invocation in netsh::dns_commands(&netsh, ADAPTER_NAME, &plan.dns) {
+        command::run(&invocation)?;
     }
 
     Ok(ActiveTunnel { adapter })
@@ -126,46 +117,10 @@ impl ActiveTunnel {
     }
 }
 
-/// Whether a VyprLite adapter exists. WireGuardNT removes an adapter when the process that
-/// created it exits, so one found here belongs to a running helper.
-pub fn adapter_exists() -> Result<bool, TunnelError> {
-    let wireguard = load_wireguard()?;
+/// The absolute path, because a bare `netsh` would be searched for in the helper's own directory
+/// first.
+fn netsh_path() -> Result<PathBuf, TunnelError> {
+    let root = std::env::var_os("SystemRoot").ok_or(TunnelError::SystemRootMissing)?;
 
-    match Adapter::open(&wireguard, ADAPTER_NAME) {
-        Ok(_) => Ok(true),
-        Err(wireguard_nt::Error::Driver(error))
-            if matches!(
-                error.raw_os_error(),
-                Some(ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND)
-            ) =>
-        {
-            Ok(false)
-        }
-        Err(source) => Err(adapter_error("opening")(source)),
-    }
-}
-
-fn run_netsh(args: &[String]) -> Result<(), TunnelError> {
-    let joined = args.join(" ");
-    let output = Command::new("netsh")
-        .args(args)
-        .output()
-        .map_err(|source| TunnelError::NetshSpawn {
-            args: joined.clone(),
-            source,
-        })?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    // netsh reports most errors on stdout.
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-
-    Err(TunnelError::Netsh {
-        args: joined,
-        status: output.status,
-        output: text.trim().to_owned(),
-    })
+    Ok(PathBuf::from(root).join(r"System32\netsh.exe"))
 }
